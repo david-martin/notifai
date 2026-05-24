@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import sys
@@ -13,6 +14,8 @@ from anthropic.types.messages.batch_create_params import Request as BatchRequest
 
 from web.database import SessionLocal
 from web.models import NotificationLog, Query, User
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are an event monitor. For each question, make exactly one web search, "
@@ -46,7 +49,7 @@ BATCH_TIMEOUT_MINUTES = int(os.environ.get("NOTIFAI_BATCH_TIMEOUT_MINUTES", "60"
 def _require_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
-        print(f"Error: required environment variable {name} is not set.", file=sys.stderr)
+        logger.error("missing_env_var name=%s", name)
         sys.exit(1)
     return value
 
@@ -66,13 +69,14 @@ _SEARCH_FAILURE_STRINGS = (
 )
 
 
-def _has_search_failure(content_blocks) -> bool:
-    """Return True if the response contains a web search tool failure."""
+def _has_search_failure(content_blocks) -> str | None:
+    """Return the failure text if the response contains a web search failure, else None."""
     for block in content_blocks:
         if getattr(block, "type", None) != "tool_result":
             continue
         if getattr(block, "is_error", False):
-            return True
+            tool_id = getattr(block, "tool_use_id", "?")
+            return f"tool_result is_error=True tool_use_id={tool_id}"
         raw = getattr(block, "content", "")
         if isinstance(raw, str):
             text = raw
@@ -87,8 +91,8 @@ def _has_search_failure(content_blocks) -> bool:
         else:
             text = str(raw) if raw else ""
         if any(s in text.lower() for s in _SEARCH_FAILURE_STRINGS):
-            return True
-    return False
+            return text
+    return None
 
 
 def _parse_response(text: str) -> dict:
@@ -150,7 +154,7 @@ def _run(db):
     )
 
     if not queries:
-        print("[runner] No active queries with credits to process.")
+        logger.info("runner_start no_active_queries")
         return
 
     if USE_BATCH and queries:
@@ -168,6 +172,7 @@ def _handle_result(db, q, user, result_dict, from_email):
     # Deduct 1 credit for this execution.
     user.query_credits = max(0, user.query_credits - 1)
     db.commit()
+    logger.info("credit_deducted query_id=%s user=%s credits_remaining=%d", q.id, user.email, user.query_credits)
 
     answer = result_dict.get("answer", "NO")
     reason = result_dict.get("reason", "")
@@ -196,16 +201,16 @@ def _handle_result(db, q, user, result_dict, from_email):
                 "text": body,
             })
             email_sent = True
-            print(f"[runner] {label}: YES — email sent to {notify_to}")
+            logger.info("email_sent query_id=%s to=%s", q.id, notify_to)
             # Auto-deactivate: query answered YES, no further daily checks needed.
             # completed=True distinguishes this from a manual pause (active=False only).
             q.active = False
             q.completed = True
             db.commit()
         except Exception as e:
-            print(f"[runner] Email error for {label}: {e}", file=sys.stderr)
+            logger.error("email_error query_id=%s exc=%s", q.id, e)
     else:
-        print(f"[runner] {label}: NO — silent.")
+        logger.info("result query_id=%s answer=NO label=%.40r", q.id, label)
 
     log = NotificationLog(
         query_id=q.id,
@@ -220,41 +225,53 @@ def _handle_result(db, q, user, result_dict, from_email):
 
 
 def _run_sequential(client, db, queries, today, from_email):
+    logger.info("runner_start query_count=%d mode=sequential", len(queries))
     for q in queries:
         user = db.query(User).filter(User.id == q.user_id).first()
         if not user:
+            logger.warning("user_not_found query_id=%s user_id=%s", q.id, q.user_id)
             continue
 
-        label = q.query_text[:40]
-        print(f"[runner] Checking '{label}' for {user.email}")
+        logger.info("query_check query_id=%s user=%s query=%.60s", q.id, user.email, q.query_text)
 
+        block_types = ""
         try:
+            logger.info("api_call model=%s query_id=%s", MODEL, q.id)
             response = client.messages.create(**_make_message_params(q.query_text, today))
+            block_types = ",".join(getattr(b, "type", "?") for b in response.content)
+            logger.info(
+                "api_response query_id=%s stop=%s blocks=%s in_tokens=%d out_tokens=%d",
+                q.id, response.stop_reason, block_types,
+                response.usage.input_tokens, response.usage.output_tokens,
+            )
         except Exception as e:
-            print(f"[runner] API error for {label}: {e}", file=sys.stderr)
+            logger.error("api_error query_id=%s exc=%s", q.id, e)
             continue
 
         # Skip on web search failure (execution error or rate limit) — no credit deduction.
-        if _has_search_failure(response.content):
-            print(f"[runner] Web search error for {label}, skipping (no credit deducted).")
+        failure = _has_search_failure(response.content)
+        if failure:
+            logger.warning("search_failure query_id=%s content=%.200s", q.id, failure)
             continue
 
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
         text_block = text_blocks[-1] if text_blocks else None
         if text_block is None:
-            print(f"[runner] No text block for {label}, skipping.")
+            logger.warning("no_text_block query_id=%s blocks=%s", q.id, block_types)
             continue
 
         try:
             result = _parse_response(text_block)
         except json.JSONDecodeError:
-            print(f"[runner] Malformed JSON for {label}: {text_block!r}")
+            logger.warning("parse_error query_id=%s raw=%.200s", q.id, text_block)
             continue
 
         _handle_result(db, q, user, result, from_email)
+    logger.info("runner_done mode=sequential query_count=%d", len(queries))
 
 
 def _run_batch(client, db, queries, today, from_email):
+    logger.info("runner_start query_count=%d mode=batch", len(queries))
     # Build a user lookup up front to avoid per-query DB calls
     user_ids = {q.user_id for q in queries}
     users = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()}
@@ -273,20 +290,17 @@ def _run_batch(client, db, queries, today, from_email):
     ]
 
     batch = client.messages.batches.create(requests=requests)
-    print(f"[runner] Batch {batch.id} submitted ({len(valid)} queries). Polling every 30s...")
+    logger.info("batch_submitted batch_id=%s count=%d", batch.id, len(valid))
 
     deadline = time.time() + BATCH_TIMEOUT_MINUTES * 60
     while time.time() < deadline:
         batch = client.messages.batches.retrieve(batch.id)
         if batch.processing_status == "ended":
             break
-        print(f"[runner] Batch {batch.id}: {batch.processing_status} — waiting...")
+        logger.info("batch_poll batch_id=%s status=%s", batch.id, batch.processing_status)
         time.sleep(30)
     else:
-        print(
-            f"[runner] Batch {batch.id} did not finish within {BATCH_TIMEOUT_MINUTES} minutes.",
-            file=sys.stderr,
-        )
+        logger.error("batch_timeout batch_id=%s timeout_minutes=%d", batch.id, BATCH_TIMEOUT_MINUTES)
         return
 
     query_by_id = {str(q.id): q for q, _ in valid}
@@ -299,26 +313,33 @@ def _run_batch(client, db, queries, today, from_email):
             continue
 
         if result.result.type != "succeeded":
-            print(f"[runner] Batch result error for {result.custom_id}: {result.result.type}")
+            logger.error("batch_result_error custom_id=%s result_type=%s", result.custom_id, result.result.type)
             continue
 
         response = result.result.message
+        block_types = ",".join(getattr(b, "type", "?") for b in response.content)
+        logger.info(
+            "api_response query_id=%s stop=%s blocks=%s in_tokens=%d out_tokens=%d",
+            result.custom_id, response.stop_reason, block_types,
+            response.usage.input_tokens, response.usage.output_tokens,
+        )
 
         # Skip on web search failure (execution error or rate limit) — no credit deduction.
-        if _has_search_failure(response.content):
-            print(f"[runner] Web search error for {result.custom_id}, skipping (no credit deducted).")
+        failure = _has_search_failure(response.content)
+        if failure:
+            logger.warning("search_failure query_id=%s content=%.200s", result.custom_id, failure)
             continue
 
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
         text_block = text_blocks[-1] if text_blocks else None
         if text_block is None:
-            print(f"[runner] No text block for {result.custom_id}, skipping.")
+            logger.warning("no_text_block query_id=%s blocks=%s", result.custom_id, block_types)
             continue
 
         try:
             parsed = _parse_response(text_block)
         except json.JSONDecodeError:
-            print(f"[runner] Malformed JSON for {result.custom_id}: {text_block!r}")
+            logger.warning("parse_error query_id=%s raw=%.200s", result.custom_id, text_block)
             continue
 
         _handle_result(db, q, user, parsed, from_email)
