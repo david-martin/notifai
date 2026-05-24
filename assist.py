@@ -5,6 +5,8 @@ import sys
 import anthropic
 import yaml
 
+from core import ASSIST_MODEL
+
 QUERIES_PATH = "queries.yaml"
 
 SYSTEM_PROMPT = (
@@ -56,7 +58,7 @@ def run():
         sys.exit(0)
 
     response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=ASSIST_MODEL,
         max_tokens=512,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": description}],
