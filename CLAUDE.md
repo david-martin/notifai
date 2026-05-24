@@ -17,6 +17,7 @@ The core project is self-hosted and open-source. A hosted version also exists �
 | Scripts are the artifact | The Python core is the product. The UI and hosting are wrappers. |
 | Silent on NO | Only notify when a condition is met. No noise. |
 | Vanilla where possible | No framework bloat. Browser standards, plain Python, readable code. |
+| Single source for Claude API logic | All message construction, response parsing, and search failure detection lives in `core.py`. Scripts and web handlers are thin callers that handle their own data access and result persistence. No Claude API logic outside `core.py`. |
 
 ---
 
@@ -101,6 +102,7 @@ Hard limit: max 1 LLM call per query creation (combined validate + generate in o
 
 ```
 notifai/
+├── core.py                         # single source for all Claude API logic
 ├── check.py                        # self-hosted daily runner
 ├── assist.py                       # self-hosted interactive query builder
 ├── queries.yaml                    # self-hosted query config (only persistent state)

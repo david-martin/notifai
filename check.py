@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import sys
 import time
 from datetime import date
@@ -9,27 +8,15 @@ import anthropic
 import resend
 import yaml
 
-from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
-from anthropic.types.messages.batch_create_params import Request as BatchRequest
+from core import make_batch_request, make_message_params, parse_response
 
-SYSTEM_PROMPT = (
-    "You are an event monitor. For each question, make exactly one web search, "
-    "then determine if the described condition is met. "
-    "Respond ONLY with valid JSON in this exact format: "
-    '{"answer": "YES" or "NO", "reason": "one sentence explanation", "sources": ["url1", "url2"]}'
-)
+# parse_response is the canonical name; keep the old name as an alias so
+# any external code or tests that imported parse_claude_response still work.
+parse_claude_response = parse_response
 
 # Configuration — all values read from environment variables with sensible defaults.
 # Secrets (RESEND_API_KEY, NOTIFY_EMAIL, RESEND_FROM_EMAIL) have no default and the
 # script will exit with a clear error if they are not set.
-
-MODEL = os.environ.get("NOTIFAI_MODEL", "claude-sonnet-4-6")
-
-# Cache TTL for the system prompt. API accepts "1h" or "5m".
-# Env var is integer seconds for readability; converted to string on use.
-# 1 hour reduces prompt write costs when many queries run close together.
-_cache_ttl_secs = int(os.environ.get("NOTIFAI_CACHE_TTL", "3600"))
-CACHE_TTL = "1h" if _cache_ttl_secs >= 3600 else "5m"
 
 QUERIES_PATH = os.environ.get("NOTIFAI_QUERIES_PATH", "queries.yaml")
 
@@ -56,15 +43,6 @@ def load_queries(path: str) -> list:
     return [q for q in data["queries"] if q.get("active")]
 
 
-def parse_claude_response(text: str) -> dict:
-    text = text.strip()
-    # Strip markdown code block if present
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        text = match.group(1)
-    return json.loads(text)
-
-
 def format_email_body(query: str, answer: str, reason: str, sources: list) -> str:
     source_lines = "\n".join(f"  - {s}" for s in sources)
     return (
@@ -74,33 +52,6 @@ def format_email_body(query: str, answer: str, reason: str, sources: list) -> st
         f"\n"
         f"Sources:\n"
         f"{source_lines}"
-    )
-
-
-def _make_message_params(query_text: str, today: str) -> dict:
-    return dict(
-        model=MODEL,
-        max_tokens=4096,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral", "ttl": CACHE_TTL},
-            }
-        ],
-        tools=[
-            {"type": "web_search_20260209", "name": "web_search", "max_uses": 1},
-            {"type": "code_execution_20260120", "name": "code_execution"},
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Today is {today}. Search the web and answer: {query_text}\n"
-                    f'Return JSON: {{"answer": "YES"|"NO", "reason": "one sentence", "sources": ["url1", ...]}}'
-                ),
-            }
-        ],
     )
 
 
@@ -125,7 +76,7 @@ def run():
 def _run_sequential(client, queries, today, notify_email, from_email):
     for q in queries:
         print(f"Checking: {q['id']}")
-        response = client.messages.create(**_make_message_params(q["query"], today))
+        response = client.messages.create(**make_message_params(q["query"], today))
 
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
         text_block = text_blocks[-1] if text_blocks else None
@@ -134,7 +85,7 @@ def _run_sequential(client, queries, today, notify_email, from_email):
             continue
 
         try:
-            result = parse_claude_response(text_block)
+            result = parse_response(text_block)
         except json.JSONDecodeError:
             print(f"  [{q['id']}] Malformed JSON response: {text_block!r}")
             continue
@@ -159,10 +110,7 @@ def _run_sequential(client, queries, today, notify_email, from_email):
 
 def _run_batch(client, queries, today, notify_email, from_email):
     requests = [
-        BatchRequest(
-            custom_id=q["id"],
-            params=MessageCreateParamsNonStreaming(**_make_message_params(q["query"], today)),
-        )
+        make_batch_request(q["id"], q["query"], today)
         for q in queries
     ]
 
@@ -202,7 +150,7 @@ def _run_batch(client, queries, today, notify_email, from_email):
             continue
 
         try:
-            parsed = parse_claude_response(text_block)
+            parsed = parse_response(text_block)
         except json.JSONDecodeError:
             print(f"  [{result.custom_id}] Malformed JSON: {text_block!r}")
             continue

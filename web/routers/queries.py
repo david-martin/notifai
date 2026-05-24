@@ -15,12 +15,18 @@ from web.database import get_db
 from web.limiter import limiter
 from web.models import NotificationLog, Query, User
 
+from core import (
+    ASSIST_MODEL,
+    MODEL,
+    has_search_failure,
+    log_search_blocks,
+    make_message_params,
+    parse_response,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/queries", tags=["queries"])
-
-# Configuration — read from env with sensible defaults.
-ASSIST_MODEL = os.environ.get("NOTIFAI_ASSIST_MODEL", "claude-haiku-4-5-20251001")
 
 anthropic_client = anthropic.Anthropic()
 
@@ -269,98 +275,6 @@ def get_history(
     }
 
 
-# System prompt for the runner (same as web/runner.py)
-_RUNNER_SYSTEM_PROMPT = (
-    "You are an event monitor. For each question, make exactly one web search, "
-    "then determine if the described condition is met. "
-    "Respond ONLY with valid JSON in this exact format: "
-    '{"answer": "YES" or "NO", "reason": "one sentence explanation", "sources": ["url1", "url2"]}'
-)
-
-
-def _parse_runner_result(text: str) -> dict:
-    text = text.strip()
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        text = match.group(1)
-    return json.loads(text)
-
-
-def _log_search_blocks(content_blocks, query_id: str) -> None:
-    """Log web search result details for each web_search_tool_result block."""
-    for block in content_blocks:
-        if getattr(block, "type", None) != "web_search_tool_result":
-            continue
-        content = getattr(block, "content", None)
-        if content is None:
-            logger.warning("web_search_no_content query_id=%s", query_id)
-            continue
-        content_type = getattr(content, "type", None)
-        if content_type == "web_search_tool_result_error":
-            error_code = getattr(content, "error_code", "unknown")
-            logger.warning("web_search_error query_id=%s error_code=%s", query_id, error_code)
-        elif isinstance(content, list):
-            logger.info("web_search_results query_id=%s count=%d", query_id, len(content))
-            for item in content[:5]:
-                title = getattr(item, "title", "?")
-                url = getattr(item, "url", "?")
-                logger.info("web_search_result query_id=%s title=%.80s url=%.120s", query_id, title, url)
-        else:
-            logger.warning("web_search_unexpected_content query_id=%s content_type=%s", query_id, type(content).__name__)
-
-
-def _has_search_failure(content_blocks) -> str | None:
-    """Return a failure description if the response contains a web search failure, else None.
-
-    Handles both:
-    - web_search_tool_result blocks (server tool, web_search_20260209): checks for a
-      typed WebSearchToolResultError with an error_code
-    - tool_result blocks (legacy client-side tool pattern): checks is_error flag and
-      known failure strings in the content text
-    """
-    for block in content_blocks:
-        block_type = getattr(block, "type", None)
-
-        if block_type == "web_search_tool_result":
-            # Server tool result — content is either WebSearchToolResultError or a list of results.
-            content = getattr(block, "content", None)
-            if content is None:
-                continue
-            content_type = getattr(content, "type", None)
-            if content_type == "web_search_tool_result_error":
-                error_code = getattr(content, "error_code", "unknown")
-                return f"web_search_tool_result_error error_code={error_code}"
-            # A list of results (even empty) is not a failure — the search ran.
-
-        elif block_type == "tool_result":
-            # Legacy client-side tool_result block.
-            if getattr(block, "is_error", False):
-                tool_id = getattr(block, "tool_use_id", "?")
-                return f"tool_result is_error=True tool_use_id={tool_id}"
-            raw = getattr(block, "content", "")
-            if isinstance(raw, str):
-                text = raw
-            elif isinstance(raw, list):
-                parts = []
-                for item in raw:
-                    if isinstance(item, dict):
-                        parts.append(item.get("text", ""))
-                    else:
-                        parts.append(getattr(item, "text", "") or "")
-                text = " ".join(parts)
-            else:
-                text = str(raw) if raw else ""
-            _LEGACY_FAILURE_STRINGS = (
-                "rate limit", "tool execution error", "tool is currently unavailable",
-                "web search is currently unavailable", "unable to retrieve current web results",
-                "search could not be completed", "unable to perform web search",
-            )
-            if any(s in text.lower() for s in _LEGACY_FAILURE_STRINGS):
-                return text
-
-    return None
-
-
 @router.post("/{query_id}/run")
 @limiter.limit("3/hour")
 def run_query_now(
@@ -386,9 +300,6 @@ def run_query_now(
             detail="No query credits remaining. Purchase more credits to continue.",
         )
 
-    model = os.environ.get("NOTIFAI_MODEL", "claude-sonnet-4-6")
-    _ttl_secs = int(os.environ.get("NOTIFAI_CACHE_TTL", "3600"))
-    cache_ttl = "1h" if _ttl_secs >= 3600 else "5m"
     today = date.today().isoformat()
 
     logger.info("run_query_start query_id=%s user=%s credits=%d", query_id, user.email, user.query_credits)
@@ -396,30 +307,8 @@ def run_query_now(
     # Always real-time — never batched. "Run now" is an on-demand check;
     # results must be available immediately, not after a batch polling cycle.
     try:
-        logger.info("api_call model=%s query=%.60s", model, q.query_text)
-        response = anthropic_client.messages.create(
-            model=model,
-            max_tokens=4096,
-            system=[
-                {
-                    "type": "text",
-                    "text": _RUNNER_SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral", "ttl": cache_ttl},
-                }
-            ],
-            tools=[
-                {"type": "web_search_20250305", "name": "web_search", "max_uses": 1},
-            ],
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Today is {today}. Search the web and answer: {q.query_text}\n"
-                        f'Return JSON: {{"answer": "YES"|"NO", "reason": "one sentence", "sources": ["url1", ...]}}'
-                    ),
-                }
-            ],
-        )
+        logger.info("api_call model=%s query=%.60s", MODEL, q.query_text)
+        response = anthropic_client.messages.create(**make_message_params(q.query_text, today))
         block_types = ",".join(getattr(b, "type", "?") for b in response.content)
         logger.info(
             "api_response stop=%s blocks=%s in_tokens=%d out_tokens=%d",
@@ -432,11 +321,11 @@ def run_query_now(
         logger.error("api_error query_id=%s exc=%s", query_id, exc)
         raise HTTPException(status_code=500, detail="API error. Please try again.")
 
-    _log_search_blocks(response.content, query_id)
+    log_search_blocks(response.content, query_id)
 
     # Detect web search failures (tool execution error OR rate limit / unavailable).
     # These are system faults — do NOT deduct a credit.
-    failure = _has_search_failure(response.content)
+    failure = has_search_failure(response.content)
     if failure:
         logger.warning("search_failure query_id=%s content=%.200s", query_id, failure)
         raise HTTPException(
@@ -451,7 +340,7 @@ def run_query_now(
         raise HTTPException(status_code=500, detail="No result from API. Please try again.")
 
     try:
-        result = _parse_runner_result(text_block)
+        result = parse_response(text_block)
     except json.JSONDecodeError:
         logger.warning("parse_error query_id=%s raw=%.200s", query_id, text_block)
         raise HTTPException(status_code=500, detail="Malformed API response. Please try again.")
