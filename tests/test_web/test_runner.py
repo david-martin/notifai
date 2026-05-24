@@ -54,8 +54,12 @@ def user_with_query(runner_db):
 def _mock_claude_response(answer: str, reason: str, sources: list):
     block = MagicMock()
     block.text = json.dumps({"answer": answer, "reason": reason, "sources": sources})
+    block.type = "text"
     response = MagicMock()
     response.content = [block]
+    response.stop_reason = "end_turn"
+    response.usage.input_tokens = 100
+    response.usage.output_tokens = 50
     return response
 
 

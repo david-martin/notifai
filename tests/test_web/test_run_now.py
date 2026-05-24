@@ -41,8 +41,12 @@ def _mock_claude(answer: str, reason: str = "Test reason.", sources: list = None
         "reason": reason,
         "sources": sources or ["http://example.com"],
     })
+    block.type = "text"
     resp = MagicMock()
     resp.content = [block]
+    resp.stop_reason = "end_turn"
+    resp.usage.input_tokens = 100
+    resp.usage.output_tokens = 50
     return resp
 
 

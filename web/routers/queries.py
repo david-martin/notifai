@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from datetime import date, datetime, timezone
@@ -13,6 +14,8 @@ from web.auth import get_current_user
 from web.database import get_db
 from web.limiter import limiter
 from web.models import NotificationLog, Query, User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/queries", tags=["queries"])
 
@@ -116,6 +119,7 @@ class DescriptionRequest(BaseModel):
 
 
 def _call_haiku(system: str, user_message: str) -> dict:
+    logger.info("haiku_call model=%s desc=%.60s", ASSIST_MODEL, user_message)
     response = anthropic_client.messages.create(
         model=ASSIST_MODEL,
         max_tokens=512,
@@ -127,7 +131,11 @@ def _call_haiku(system: str, user_message: str) -> dict:
     match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if match:
         text = match.group(1)
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("haiku_parse_error raw=%.200s", text)
+        raise
 
 
 def _get_owned_query(db: DBSession, query_id: str, user: User) -> Query:
@@ -146,9 +154,11 @@ def validate_description(
 ):
     rejection = _pre_guard(body.description)
     if rejection:
+        logger.info("validate_preguard_reject user=%s reason=%.80s", user.email, rejection)
         return {"valid": False, "feedback": rejection}
     result = _call_haiku(COMBINED_SYSTEM_PROMPT, body.description)
     valid = result.get("valid", False)
+    logger.info("validate_result user=%s valid=%s feedback=%.80s", user.email, valid, result.get("feedback", ""))
     response: dict = {"valid": valid, "feedback": result.get("feedback", "")}
     if valid:
         query_text = result.get("query_text", "").strip()
@@ -290,8 +300,8 @@ _SEARCH_FAILURE_STRINGS = (
 )
 
 
-def _has_search_failure(content_blocks) -> bool:
-    """Return True if the response contains a web search tool failure.
+def _has_search_failure(content_blocks) -> str | None:
+    """Return the failure text if the response contains a web search failure, else None.
 
     Checks both the is_error flag (tool execution error) and the text content
     of tool_result blocks (rate-limiting, service unavailable).
@@ -300,7 +310,8 @@ def _has_search_failure(content_blocks) -> bool:
         if getattr(block, "type", None) != "tool_result":
             continue
         if getattr(block, "is_error", False):
-            return True
+            tool_id = getattr(block, "tool_use_id", "?")
+            return f"tool_result is_error=True tool_use_id={tool_id}"
         # Also inspect content text for known failure strings.
         raw = getattr(block, "content", "")
         if isinstance(raw, str):
@@ -316,8 +327,8 @@ def _has_search_failure(content_blocks) -> bool:
         else:
             text = str(raw) if raw else ""
         if any(s in text.lower() for s in _SEARCH_FAILURE_STRINGS):
-            return True
-    return False
+            return text
+    return None
 
 
 @router.post("/{query_id}/run")
@@ -339,6 +350,7 @@ def run_query_now(
     q = _get_owned_query(db, query_id, user)
 
     if user.query_credits <= 0:
+        logger.warning("run_query_no_credits query_id=%s user=%s", query_id, user.email)
         raise HTTPException(
             status_code=402,
             detail="No query credits remaining. Purchase more credits to continue.",
@@ -349,9 +361,12 @@ def run_query_now(
     cache_ttl = "1h" if _ttl_secs >= 3600 else "5m"
     today = date.today().isoformat()
 
+    logger.info("run_query_start query_id=%s user=%s credits=%d", query_id, user.email, user.query_credits)
+
     # Always real-time — never batched. "Run now" is an on-demand check;
     # results must be available immediately, not after a batch polling cycle.
     try:
+        logger.info("api_call model=%s query=%.60s", model, q.query_text)
         response = anthropic_client.messages.create(
             model=model,
             max_tokens=4096,
@@ -376,12 +391,23 @@ def run_query_now(
                 }
             ],
         )
-    except Exception:
+        block_types = ",".join(getattr(b, "type", "?") for b in response.content)
+        logger.info(
+            "api_response stop=%s blocks=%s in_tokens=%d out_tokens=%d",
+            response.stop_reason,
+            block_types,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        )
+    except Exception as exc:
+        logger.error("api_error query_id=%s exc=%s", query_id, exc)
         raise HTTPException(status_code=500, detail="API error. Please try again.")
 
     # Detect web search failures (tool execution error OR rate limit / unavailable).
     # These are system faults — do NOT deduct a credit.
-    if _has_search_failure(response.content):
+    failure = _has_search_failure(response.content)
+    if failure:
+        logger.warning("search_failure query_id=%s content=%.200s", query_id, failure)
         raise HTTPException(
             status_code=503,
             detail="Web search unavailable. Please try again in a moment.",
@@ -390,11 +416,13 @@ def run_query_now(
     text_blocks = [b.text for b in response.content if hasattr(b, "text")]
     text_block = text_blocks[-1] if text_blocks else None
     if text_block is None:
+        logger.warning("no_text_block query_id=%s blocks=%s", query_id, block_types)
         raise HTTPException(status_code=500, detail="No result from API. Please try again.")
 
     try:
         result = _parse_runner_result(text_block)
     except json.JSONDecodeError:
+        logger.warning("parse_error query_id=%s raw=%.200s", query_id, text_block)
         raise HTTPException(status_code=500, detail="Malformed API response. Please try again.")
 
     answer = result.get("answer", "NO")
@@ -406,6 +434,7 @@ def run_query_now(
     # failures return early above without reaching this point).
     user.query_credits = max(0, user.query_credits - 1)
     db.commit()
+    logger.info("credit_deducted query_id=%s credits_remaining=%d", query_id, user.query_credits)
 
     if answer == "YES":
         from_email = os.environ.get("RESEND_FROM_EMAIL", "")
@@ -428,10 +457,12 @@ def run_query_now(
                     "text": body,
                 })
                 email_sent = True
-            except Exception:
-                pass  # Non-fatal �� still return the result to the user
+                logger.info("email_sent query_id=%s to=%s", query_id, notify_to)
+            except Exception as exc:
+                logger.error("email_error query_id=%s exc=%s", query_id, exc)
         # No auto-deactivation: manual "run now" checks do not retire the query.
 
+    logger.info("run_query_done query_id=%s answer=%s email_sent=%s", query_id, answer, email_sent)
     checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
     log = NotificationLog(
         query_id=q.id,
