@@ -12,6 +12,11 @@ paused). Existing rows default to False.
 import sqlalchemy as sa
 from alembic import op
 
+revision = 'c5d6e7f8a9b0'
+down_revision = 'b3c4d5e6f7a8'
+branch_labels = None
+depends_on = None
+
 
 def upgrade():
     with op.batch_alter_table("queries") as batch_op:
