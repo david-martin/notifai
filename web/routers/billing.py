@@ -67,6 +67,7 @@ def create_checkout(
             success_url=SUCCESS_URL,
             cancel_url=CANCEL_URL,
         )
+        logger.info("checkout_created user_id=%s package=%s credits=%d", user.id, body.package, pkg["credits"])
         return {"url": session.url}
     except stripe.StripeError as e:
         logger.error("Stripe checkout error for user %s: %s", user.id, e)
@@ -82,6 +83,8 @@ async def stripe_webhook(request: Request, db: DBSession = Depends(get_db)):
         event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
     except stripe.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
+
+    logger.info("webhook_received event_type=%s", event["type"])
 
     if event["type"] == "checkout.session.completed":
         obj = event["data"]["object"]
