@@ -84,7 +84,7 @@ Hard limit: max 1 LLM call per query creation (combined validate + generate in o
 
 | Area | Decision |
 |---|---|
-| Query runner model | `claude-sonnet-4-6` with `web_search_20260209` + `code_execution_20260120` |
+| Query runner model | `claude-sonnet-4-6` with `web_search_20250305` (one search, `max_uses=1`) |
 | Query assistant model | `claude-haiku-4-5-20251001` (validation + generation — cheap, fast) |
 | Email | Resend |
 | Self-hosted config | `queries.yaml` — the only persistent state, no database |
@@ -148,7 +148,55 @@ notifai/
 
 ---
 
+## Web search tool — do not change without reading this
+
+The runner uses `web_search_20250305` with `max_uses=1`. This is intentional.
+
+**Do NOT switch to `web_search_20260209`** — it is a "deep research" compound tool that
+internally spins up a `code_execution` sandbox, fetches pages inside it, and delivers
+results back as `code_execution_tool_result` blocks. It routinely hits Anthropic's internal
+execution budget on queries (~60 s, 1500+ output tokens) and then reports a "tool limit
+error" to the model, which answers NO with a false failure reason. Confirmed bad in production.
+
+**Do NOT add `code_execution_20260120`** to the tools list. It was removed because the 2026
+web search tool was triggering 15+ code execution cycles per query. With the 2025 tool it
+is not needed.
+
+The 2025 tool (`web_search_20250305`) returns search results directly, is fast (~5 s), and
+gives Claude clean text to reason from — exactly right for a YES/NO event check.
+
+---
+
+## Logging
+
+`web/logging_config.py` — centralised logging with per-request trace IDs.
+
+Every log line from the app looks like:
+```
+[INFO    ] queries      [a3f2b1c0] run_query_start query_id=... user=... credits=12
+```
+
+The `[a3f2b1c0]` token is the request trace ID set by the middleware in `main.py`. All log
+lines for one HTTP request share the same ID. Use it to trace a full request end-to-end:
+
+```bash
+sudo journalctl -u notifai-web | grep a3f2b1c0
+```
+
+Key events logged in `run_query_now`:
+- `run_query_start` — query_id, user, credits
+- `api_call` — model, query (truncated)
+- `api_response` — stop reason, block types, token counts
+- `web_search_results` — count of results returned + up to 5 titles/URLs
+- `web_search_error` — error_code if the search tool itself failed (no credit deducted)
+- `search_failure` — failure description (triggers 503, no credit deducted)
+- `credit_deducted` — credits_remaining
+- `run_query_done` — answer, email_sent
+
+---
+
 ## References
 
 - Original design spec (self-hosted): `docs/specs/2026-05-22-ai-notifier-design.md`
+- Server logging design spec: `docs/superpowers/specs/2026-05-24-server-logging-design.md`
 - Hosted deployment & ops (logs, services, deploy files): `../notifai-hosted/CLAUDE.md`
