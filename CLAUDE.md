@@ -151,3 +151,4 @@ notifai/
 ## References
 
 - Original design spec (self-hosted): `docs/specs/2026-05-22-ai-notifier-design.md`
+- Hosted deployment & ops (logs, services, deploy files): `../notifai-hosted/CLAUDE.md`
