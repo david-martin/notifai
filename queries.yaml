@@ -1,0 +1,10 @@
+queries:
+  - id: python-4-release
+    description: Python 4.0 has been officially released
+    query: Has Python 4.0 been officially released? Check the official python.org website and release announcements.
+    active: true
+
+  - id: mars-crewed-landing
+    description: First crewed Mars landing has occurred
+    query: Has the first crewed mission to Mars successfully landed on the Martian surface?
+    active: true

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>notifai — account</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e8eaf0;
+      --muted: #7b7f94;
+      --accent: #6c8ef7;
+      --accent-hover: #8aa3ff;
+      --green: #4ade80;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .logo span { color: var(--accent); }
+
+    nav { display: flex; gap: 1.5rem; align-items: center; font-size: 0.875rem; }
+    nav a { color: var(--muted); text-decoration: none; }
+    nav a:hover { color: var(--text); }
+    nav a.active { color: var(--text); }
+
+    .btn-link {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 0.875rem; padding: 0; text-decoration: underline;
+    }
+    .btn-link:hover { color: var(--text); }
+
+    main {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    h1 { font-size: 1.1rem; margin-bottom: 1.5rem; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    .card h2 { font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem; }
+
+    .field-group { margin-bottom: 1rem; }
+    .field-group:last-child { margin-bottom: 0; }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+
+    input[type="email"], input[type="text"] {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 0.875rem;
+      color: var(--text);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: var(--accent); }
+    input::placeholder { color: var(--muted); }
+    input:disabled { opacity: 0.5; }
+
+    .row { display: flex; gap: 0.5rem; align-items: flex-end; }
+    .row input { flex: 1; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.6rem 1rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.4; cursor: default; }
+
+    .success-msg { display: none; margin-top: 0.5rem; font-size: 0.8rem; color: var(--green); }
+    .error-msg { display: none; margin-top: 0.5rem; font-size: 0.8rem; color: #f87171; }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.875rem;
+      padding: 0.25rem 0;
+    }
+    .info-row .key { color: var(--muted); }
+    .info-row .value { font-weight: 500; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">notif<span>ai</span></div>
+    <nav>
+      <a href="/dashboard.html">Queries</a>
+      <a href="/account.html" class="active">Account</a>
+      <button class="btn-link" id="logoutBtn">Sign out</button>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Account</h1>
+
+    <div class="card">
+      <h2>Profile</h2>
+      <div class="info-row">
+        <span class="key">Sign-in email</span>
+        <span class="value" id="loginEmail">—</span>
+      </div>
+      <div class="info-row" style="margin-top:0.5rem">
+        <span class="key">Plan</span>
+        <span class="value" id="tierDisplay">—</span>
+      </div>
+      <div id="upgradeSection" style="display:none;margin-top:1rem">
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.6rem">
+          Free tier: 2 active queries. Upgrade to Pro for more.
+        </p>
+        <button class="btn-primary" id="upgradeBtn">Upgrade to Pro — €4/month</button>
+        <div class="error-msg" id="upgradeError"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Notification email</h2>
+      <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.75rem">
+        Notifications go here. Leave blank to use your sign-in email.
+      </p>
+      <div class="row">
+        <input type="email" id="notifyEmail" placeholder="same as sign-in email">
+        <button class="btn-primary" id="saveBtn">Save</button>
+      </div>
+      <div class="success-msg" id="saveSuccess">Saved.</div>
+      <div class="error-msg" id="saveError"></div>
+    </div>
+  </main>
+
+  <script>
+    async function api(path, options = {}) {
+      const r = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      if (r.status === 401) { window.location.replace("/"); return null; }
+      return r;
+    }
+
+    async function init() {
+      const r = await api("/auth/me");
+      if (!r) return;
+      const me = await r.json();
+      document.getElementById("loginEmail").textContent = me.email;
+      document.getElementById("tierDisplay").textContent =
+        me.tier === "free" ? "Free" : "Pro";
+
+      if (me.notify_email) {
+        document.getElementById("notifyEmail").value = me.notify_email;
+      }
+      if (me.tier === "free") {
+        document.getElementById("upgradeSection").style.display = "block";
+      }
+
+      // Handle ?upgraded=1 redirect from Stripe
+      if (location.search.includes("upgraded=1")) {
+        document.getElementById("tierDisplay").textContent = "Pro";
+        document.getElementById("upgradeSection").style.display = "none";
+      }
+    }
+
+    document.getElementById("saveBtn").addEventListener("click", async () => {
+      const val = document.getElementById("notifyEmail").value.trim();
+      const btn = document.getElementById("saveBtn");
+      const success = document.getElementById("saveSuccess");
+      const error = document.getElementById("saveError");
+      success.style.display = "none";
+      error.style.display = "none";
+      btn.disabled = true;
+
+      const r = await api("/auth/account", {
+        method: "PATCH",
+        body: JSON.stringify({ notify_email: val || null }),
+      });
+      btn.disabled = false;
+      if (!r) return;
+      if (r.ok) {
+        success.style.display = "block";
+      } else {
+        const d = await r.json().catch(() => ({}));
+        error.textContent = d.detail || "Failed to save.";
+        error.style.display = "block";
+      }
+    });
+
+    document.getElementById("upgradeBtn")?.addEventListener("click", async () => {
+      const btn = document.getElementById("upgradeBtn");
+      const err = document.getElementById("upgradeError");
+      err.style.display = "none";
+      btn.disabled = true;
+      btn.textContent = "Redirecting…";
+      const r = await api("/billing/checkout", { method: "POST" });
+      if (!r) return;
+      if (r.ok) {
+        const { url } = await r.json();
+        window.location.href = url;
+      } else {
+        err.textContent = "Failed to start checkout. Please try again.";
+        err.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Upgrade to Pro — €4/month";
+      }
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await api("/auth/logout", { method: "POST" });
+      window.location.replace("/");
+    });
+
+    init();
+  </script>
+</body>
+</html>

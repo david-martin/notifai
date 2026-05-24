@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>notifai — dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2a2d3a;
+      --text: #e8eaf0;
+      --muted: #7b7f94;
+      --accent: #6c8ef7;
+      --accent-hover: #8aa3ff;
+      --green: #4ade80;
+      --red: #f87171;
+      --yellow: #fbbf24;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .logo span { color: var(--accent); }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      font-size: 0.875rem;
+    }
+
+    .email-display { color: var(--muted); }
+
+    .btn-link {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.875rem;
+      padding: 0;
+      text-decoration: underline;
+    }
+    .btn-link:hover { color: var(--text); }
+
+    main {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+
+    h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.4; cursor: default; }
+
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-secondary:hover { background: var(--border); }
+
+    .btn-danger {
+      background: none;
+      border: none;
+      color: var(--red);
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 0;
+      opacity: 0.7;
+    }
+    .btn-danger:hover { opacity: 1; }
+
+    /* Query list */
+    .query-list { display: flex; flex-direction: column; gap: 0.75rem; }
+
+    .query-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .query-card.inactive { opacity: 0.55; }
+
+    .query-toggle {
+      margin-top: 2px;
+      flex-shrink: 0;
+      width: 36px;
+      height: 20px;
+      background: var(--border);
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.15s;
+    }
+    .query-toggle.on { background: var(--accent); }
+    .query-toggle::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      background: #fff;
+      border-radius: 50%;
+      transition: left 0.15s;
+    }
+    .query-toggle.on::after { left: 18px; }
+
+    .query-body { flex: 1; min-width: 0; }
+
+    .query-description {
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .query-text {
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.5;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .query-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+
+    .status-badge {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .status-badge.active { background: rgba(108,142,247,0.15); color: var(--accent); }
+    .status-badge.paused { background: rgba(123,127,148,0.15); color: var(--muted); }
+
+    /* Create flow */
+    .create-panel {
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    .create-panel h3 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+
+    textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      color: var(--text);
+      font-size: 0.875rem;
+      font-family: inherit;
+      line-height: 1.5;
+      resize: vertical;
+      min-height: 72px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    textarea:focus { border-color: var(--accent); }
+    textarea::placeholder { color: var(--muted); }
+
+    .feedback-box {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      display: none;
+    }
+    .feedback-box.invalid { background: rgba(248,113,113,0.1); color: var(--red); }
+    .feedback-box.valid { background: rgba(74,222,128,0.1); color: var(--green); }
+
+    .generated-preview {
+      display: none;
+      margin-top: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+    }
+
+    .generated-preview .field { margin-bottom: 0.5rem; }
+    .generated-preview .field:last-child { margin-bottom: 0; }
+    .generated-preview .field-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.2rem;
+    }
+    .generated-preview .field-value { font-size: 0.875rem; }
+
+    .create-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .step-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.75rem;
+      margin-bottom: 0.4rem;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .empty-state p { margin-top: 0.5rem; font-size: 0.8rem; }
+
+    .limit-notice {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-align: right;
+      margin-top: 0.5rem;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      color: var(--red);
+      font-size: 0.8rem;
+      margin-top: 0.5rem;
+      display: none;
+    }
+
+    .notify-prefix {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.4rem;
+    }
+
+    .example-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.6rem;
+    }
+
+    .example-chip {
+      font-size: 0.75rem;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.25rem 0.6rem;
+      cursor: pointer;
+      line-height: 1.4;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .example-chip:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">notif<span>ai</span></div>
+    <div class="header-actions">
+      <span class="email-display" id="userEmail"></span>
+      <a href="/history.html" style="color:var(--muted);font-size:0.875rem;text-decoration:none;">History</a>
+      <a href="/account.html" style="color:var(--muted);font-size:0.875rem;text-decoration:none;">Account</a>
+      <button class="btn-link" id="logoutBtn">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="section-header">
+      <h2>Your queries</h2>
+      <button class="btn-primary" id="newQueryBtn">+ New query</button>
+    </div>
+
+    <!-- Create flow panel (hidden by default) -->
+    <div class="create-panel" id="createPanel" style="display:none">
+      <h3>New query</h3>
+
+      <!-- Step 1: describe -->
+      <div id="step1">
+        <p class="notify-prefix">Notify me when…</p>
+        <textarea id="descInput" rows="3"></textarea>
+        <div class="example-chips" id="exampleChips"></div>
+        <div class="feedback-box" id="feedbackBox"></div>
+        <div id="reframeBox" style="display:none;margin-top:0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem">
+          <p style="font-size:0.75rem;color:var(--muted);margin-bottom:0.4rem">Did you mean?</p>
+          <p id="reframeText" style="font-size:0.9rem;margin-bottom:0.6rem"></p>
+          <div style="display:flex;gap:0.5rem">
+            <button class="btn-primary" id="useReframeBtn">Yes, use this</button>
+            <button class="btn-secondary" id="editInsteadBtn">No, let me edit</button>
+          </div>
+        </div>
+        <div class="create-actions">
+          <button class="btn-primary" id="validateBtn">Check &amp; continue</button>
+          <button class="btn-secondary" id="cancelBtn1">Cancel</button>
+        </div>
+        <div class="error-msg" id="validateError"></div>
+      </div>
+
+      <!-- Step 2: preview generated query -->
+      <div id="step2" style="display:none">
+        <p class="step-label">We'll monitor this daily</p>
+        <div class="generated-preview" id="generatedPreview" style="display:block">
+          <div class="field">
+            <div class="field-value" id="previewQuery"></div>
+          </div>
+        </div>
+        <div class="create-actions">
+          <button class="btn-primary" id="confirmBtn">Add query</button>
+          <button class="btn-secondary" id="backBtn">Back</button>
+          <button class="btn-secondary" id="cancelBtn2">Cancel</button>
+        </div>
+        <div class="error-msg" id="confirmError"></div>
+      </div>
+    </div>
+
+    <!-- Query list -->
+    <div id="queryList" class="query-list"></div>
+    <p class="limit-notice" id="limitNotice"></p>
+  </main>
+
+  <script src="/examples.js"></script>
+  <script>
+    let queries = [];
+    let generatedQuery = null;
+    let userTier = "free";
+
+    function renderExampleChips() {
+      const container = document.getElementById("exampleChips");
+      container.innerHTML = "";
+      const pick = NOTIFAI_EXAMPLES.slice().sort(() => Math.random() - 0.5).slice(0, 3);
+      pick.forEach(text => {
+        const btn = document.createElement("button");
+        btn.className = "example-chip";
+        btn.type = "button";
+        btn.textContent = text;
+        btn.addEventListener("click", () => {
+          document.getElementById("descInput").value = text;
+          document.getElementById("descInput").focus();
+        });
+        container.appendChild(btn);
+      });
+    }
+
+    async function api(path, options = {}) {
+      const r = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      if (r.status === 401) { window.location.replace("/"); return null; }
+      return r;
+    }
+
+    async function init() {
+      const meRes = await api("/auth/me");
+      if (!meRes) return;
+      const me = await meRes.json();
+      document.getElementById("userEmail").textContent = me.email;
+      userTier = me.tier;
+      await loadQueries();
+    }
+
+    async function loadQueries() {
+      const r = await api("/queries");
+      if (!r) return;
+      queries = await r.json();
+      renderQueries();
+    }
+
+    function renderQueries() {
+      const list = document.getElementById("queryList");
+      const notice = document.getElementById("limitNotice");
+      const activeCount = queries.filter(q => q.active).length;
+      const limit = userTier === "free" ? 2 : null;
+
+      if (queries.length === 0) {
+        list.innerHTML = `<div class="empty-state"><strong>No queries yet.</strong><p>Add one above to get started.</p></div>`;
+        notice.textContent = "";
+        return;
+      }
+
+      list.innerHTML = queries.map(q => `
+        <div class="query-card ${q.active ? "" : "inactive"}" data-id="${q.id}">
+          <button
+            class="query-toggle ${q.active ? "on" : ""}"
+            title="${q.active ? "Pause" : "Resume"}"
+            onclick="toggleQuery('${q.id}', ${!q.active})"
+          ></button>
+          <div class="query-body">
+            <div class="query-text">${escHtml(q.query_text)}</div>
+            <div class="query-meta">
+              <span class="status-badge ${q.active ? "active" : "paused"}">${q.active ? "Active" : "Paused"}</span>
+              <button class="btn-danger" onclick="deleteQuery('${q.id}')">Remove</button>
+            </div>
+          </div>
+        </div>
+      `).join("");
+
+      if (limit) {
+        notice.textContent = `${activeCount} of ${limit} active queries used (free tier)`;
+      } else {
+        notice.textContent = "";
+      }
+
+      const atLimit = limit && activeCount >= limit;
+      document.getElementById("newQueryBtn").disabled = atLimit;
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    async function toggleQuery(id, active) {
+      await api(`/queries/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active }),
+      });
+      await loadQueries();
+    }
+
+    async function deleteQuery(id) {
+      if (!confirm("Remove this query?")) return;
+      await api(`/queries/${id}`, { method: "DELETE" });
+      await loadQueries();
+    }
+
+    // Create flow
+    function resetStep1() {
+      document.getElementById("feedbackBox").style.display = "none";
+      document.getElementById("reframeBox").style.display = "none";
+      document.getElementById("validateError").style.display = "none";
+      document.getElementById("validateBtn").style.display = "";
+    }
+
+    document.getElementById("newQueryBtn").addEventListener("click", () => {
+      document.getElementById("createPanel").style.display = "block";
+      document.getElementById("step1").style.display = "block";
+      document.getElementById("step2").style.display = "none";
+      const descInput = document.getElementById("descInput");
+      descInput.value = "";
+      descInput.placeholder = NOTIFAI_EXAMPLES[Math.floor(Math.random() * NOTIFAI_EXAMPLES.length)];
+      document.getElementById("newQueryBtn").style.display = "none";
+      resetStep1();
+      renderExampleChips();
+      generatedQuery = null;
+    });
+
+    function closePanel() {
+      document.getElementById("createPanel").style.display = "none";
+      document.getElementById("newQueryBtn").style.display = "";
+    }
+
+    document.getElementById("cancelBtn1").addEventListener("click", closePanel);
+    document.getElementById("cancelBtn2").addEventListener("click", closePanel);
+
+    document.getElementById("validateBtn").addEventListener("click", async () => {
+      const desc = document.getElementById("descInput").value.trim();
+      if (!desc) return;
+      const btn = document.getElementById("validateBtn");
+      const fb = document.getElementById("feedbackBox");
+      const errEl = document.getElementById("validateError");
+      errEl.style.display = "none";
+
+      if (desc.length < 10) {
+        errEl.textContent = "Please describe the event in more detail.";
+        errEl.style.display = "block";
+        return;
+      }
+      if (desc.length > 500) {
+        errEl.textContent = "Description is too long (maximum 500 characters).";
+        errEl.style.display = "block";
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span>Checking…`;
+
+      try {
+        const r = await api("/queries/validate", {
+          method: "POST",
+          body: JSON.stringify({ description: desc }),
+        });
+        if (!r) return;
+
+        if (r.status === 429) {
+          errEl.textContent = "Monthly creation limit reached. Try again next month.";
+          errEl.style.display = "block";
+          btn.disabled = false;
+          btn.textContent = "Check & continue";
+          return;
+        }
+
+        const data = await r.json();
+
+        if (data.valid) {
+          fb.className = "feedback-box valid";
+          fb.textContent = data.feedback;
+          fb.style.display = "block";
+          await runGenerate(desc, btn, errEl);
+        } else if (data.reframed) {
+          // Reframe suggestion — show it, hide the validate button
+          fb.className = "feedback-box invalid";
+          fb.textContent = data.feedback;
+          fb.style.display = "block";
+          document.getElementById("reframeText").textContent = data.reframed;
+          document.getElementById("reframeBox").style.display = "block";
+          document.getElementById("validateBtn").style.display = "none";
+          btn.disabled = false;
+          btn.textContent = "Check & continue";
+        } else {
+          fb.className = "feedback-box invalid";
+          fb.textContent = data.feedback;
+          fb.style.display = "block";
+          btn.disabled = false;
+          btn.textContent = "Check & continue";
+        }
+      } catch (_) {
+        errEl.textContent = "Network error. Please try again.";
+        errEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Check & continue";
+      }
+    });
+
+    async function runGenerate(desc, btn, errEl) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span>Generating…`;
+      const gr = await api("/queries/generate", {
+        method: "POST",
+        body: JSON.stringify({ description: desc }),
+      });
+      if (!gr) return;
+
+      if (gr.status === 429) {
+        errEl.textContent = "Monthly creation limit reached.";
+        errEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Check & continue";
+        return;
+      }
+
+      generatedQuery = await gr.json();
+      document.getElementById("previewQuery").textContent = generatedQuery.query_text;
+      document.getElementById("step1").style.display = "none";
+      document.getElementById("step2").style.display = "block";
+      btn.disabled = false;
+      btn.textContent = "Check & continue";
+    }
+
+    document.getElementById("useReframeBtn").addEventListener("click", async () => {
+      const reframed = document.getElementById("reframeText").textContent;
+      const btn = document.getElementById("validateBtn");
+      const errEl = document.getElementById("validateError");
+      document.getElementById("descInput").value = reframed;
+      document.getElementById("reframeBox").style.display = "none";
+      document.getElementById("feedbackBox").style.display = "none";
+      errEl.style.display = "none";
+      await runGenerate(reframed, btn, errEl);
+    });
+
+    document.getElementById("editInsteadBtn").addEventListener("click", () => {
+      const reframed = document.getElementById("reframeText").textContent;
+      document.getElementById("descInput").value = reframed;
+      resetStep1();
+      document.getElementById("descInput").focus();
+    });
+
+    document.getElementById("backBtn").addEventListener("click", () => {
+      document.getElementById("step2").style.display = "none";
+      document.getElementById("step1").style.display = "block";
+      resetStep1();
+    });
+
+    document.getElementById("confirmBtn").addEventListener("click", async () => {
+      if (!generatedQuery) return;
+      const btn = document.getElementById("confirmBtn");
+      const errEl = document.getElementById("confirmError");
+      errEl.style.display = "none";
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span>Adding…`;
+
+      try {
+        const r = await api("/queries", {
+          method: "POST",
+          body: JSON.stringify({
+            query_text: generatedQuery.query_text,
+          }),
+        });
+        if (!r) return;
+
+        if (r.status === 429) {
+          errEl.textContent = "Active query limit reached. Pause or remove an existing query.";
+          errEl.style.display = "block";
+          btn.disabled = false;
+          btn.textContent = "Add query";
+          return;
+        }
+
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          errEl.textContent = d.detail || "Failed to add query.";
+          errEl.style.display = "block";
+          btn.disabled = false;
+          btn.textContent = "Add query";
+          return;
+        }
+
+        closePanel();
+        await loadQueries();
+      } catch (_) {
+        errEl.textContent = "Network error.";
+        errEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Add query";
+      }
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await api("/auth/logout", { method: "POST" });
+      window.location.replace("/");
+    });
+
+    init();
+  </script>
+</body>
+</html>
