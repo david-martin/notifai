@@ -563,6 +563,14 @@
         return;
       }
 
+      if (r.status === 503) {
+        const panel = document.createElement("div");
+        panel.className = "run-now-result";
+        panel.innerHTML = `<div class="rn-answer no">Web search unavailable — no credit deducted. Try again in a moment.</div>`;
+        card.querySelector(".query-body").appendChild(panel);
+        return;
+      }
+
       if (!r.ok) {
         const panel = document.createElement("div");
         panel.className = "run-now-result";

@@ -198,6 +198,14 @@ def _run_sequential(client, db, queries, today, from_email):
             print(f"[runner] API error for {label}: {e}", file=sys.stderr)
             continue
 
+        # Skip on web search tool execution error — system fault, no credit deduction.
+        if any(
+            getattr(b, "type", None) == "tool_result" and getattr(b, "is_error", False)
+            for b in response.content
+        ):
+            print(f"[runner] Web search error for {label}, skipping (no credit deducted).")
+            continue
+
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
         text_block = text_blocks[-1] if text_blocks else None
         if text_block is None:
@@ -262,6 +270,15 @@ def _run_batch(client, db, queries, today, from_email):
             continue
 
         response = result.result.message
+
+        # Skip on web search tool execution error — system fault, no credit deduction.
+        if any(
+            getattr(b, "type", None) == "tool_result" and getattr(b, "is_error", False)
+            for b in response.content
+        ):
+            print(f"[runner] Web search error for {result.custom_id}, skipping (no credit deducted).")
+            continue
+
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
         text_block = text_blocks[-1] if text_blocks else None
         if text_block is None:

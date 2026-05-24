@@ -335,6 +335,17 @@ def run_query_now(
     except Exception:
         raise HTTPException(status_code=500, detail="API error. Please try again.")
 
+    # Detect server-side tool execution errors (e.g. web search failure).
+    # These are system faults — do NOT deduct a credit.
+    if any(
+        getattr(b, "type", None) == "tool_result" and getattr(b, "is_error", False)
+        for b in response.content
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="Web search unavailable. Please try again in a moment.",
+        )
+
     text_blocks = [b.text for b in response.content if hasattr(b, "text")]
     text_block = text_blocks[-1] if text_blocks else None
     if text_block is None:
@@ -350,7 +361,8 @@ def run_query_now(
     sources = result.get("sources", [])
     email_sent = False
 
-    # Deduct 1 credit — only reached on a valid API response (errors return early above).
+    # Deduct 1 credit — only reached on a valid answer (tool errors and parse
+    # failures return early above without reaching this point).
     user.query_credits = max(0, user.query_credits - 1)
     db.commit()
 
