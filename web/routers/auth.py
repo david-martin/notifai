@@ -62,14 +62,24 @@ def verify(request: Request, token: str, response: Response, db: DBSession = Dep
     return redirect
 
 
+def _user_dict(user) -> dict:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "notify_email": user.notify_email,
+        "tier": user.tier,
+        "query_credits": user.query_credits,
+    }
+
+
 @router.get("/me")
 def me(user=Depends(get_current_user)):
-    return {"id": user.id, "email": user.email, "notify_email": user.notify_email, "tier": user.tier}
+    return _user_dict(user)
 
 
 @router.get("/account")
 def get_account(user=Depends(get_current_user)):
-    return {"id": user.id, "email": user.email, "notify_email": user.notify_email, "tier": user.tier}
+    return _user_dict(user)
 
 
 @router.patch("/account")
@@ -80,12 +90,7 @@ def patch_account(
 ):
     user.notify_email = body.notify_email
     db.commit()
-    return {
-        "id": user.id,
-        "email": user.email,
-        "notify_email": user.notify_email,
-        "tier": user.tier,
-    }
+    return _user_dict(user)
 
 
 @router.post("/logout")

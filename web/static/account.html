@@ -147,16 +147,40 @@
         <span class="value" id="loginEmail">—</span>
       </div>
       <div class="info-row" style="margin-top:0.5rem">
-        <span class="key">Plan</span>
-        <span class="value" id="tierDisplay">—</span>
+        <span class="key">Query credits</span>
+        <span class="value" id="creditDisplay">—</span>
       </div>
-      <div id="upgradeSection" style="display:none;margin-top:1rem">
-        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.6rem">
-          Free tier: 2 active queries. Upgrade to Pro for more.
-        </p>
-        <button class="btn-primary" id="upgradeBtn">Upgrade to Pro — €4/month</button>
-        <div class="error-msg" id="upgradeError"></div>
+    </div>
+
+    <div class="card">
+      <h2>Buy credits</h2>
+      <p style="font-size:0.8rem;color:var(--muted);margin-bottom:1rem">
+        Each query check costs 1 credit. Credits never expire. No subscription.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:0.6rem">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:600">80 credits</span>
+            <span style="color:var(--muted);font-size:0.8rem;margin-left:0.4rem">€4</span>
+          </div>
+          <button class="btn-primary" data-package="small">Buy</button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:600">160 credits</span>
+            <span style="color:var(--muted);font-size:0.8rem;margin-left:0.4rem">€8</span>
+          </div>
+          <button class="btn-primary" data-package="medium">Buy</button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:600">320 credits</span>
+            <span style="color:var(--muted);font-size:0.8rem;margin-left:0.4rem">€16</span>
+          </div>
+          <button class="btn-primary" data-package="large">Buy</button>
+        </div>
       </div>
+      <div class="error-msg" id="buyError"></div>
     </div>
 
     <div class="card">
@@ -188,20 +212,22 @@
       if (!r) return;
       const me = await r.json();
       document.getElementById("loginEmail").textContent = me.email;
-      document.getElementById("tierDisplay").textContent =
-        me.tier === "free" ? "Free" : "Pro";
+      document.getElementById("creditDisplay").textContent =
+        me.query_credits === 1 ? "1 credit" : `${me.query_credits} credits`;
 
       if (me.notify_email) {
         document.getElementById("notifyEmail").value = me.notify_email;
       }
-      if (me.tier === "free") {
-        document.getElementById("upgradeSection").style.display = "block";
-      }
 
-      // Handle ?upgraded=1 redirect from Stripe
-      if (location.search.includes("upgraded=1")) {
-        document.getElementById("tierDisplay").textContent = "Pro";
-        document.getElementById("upgradeSection").style.display = "none";
+      // Handle ?purchased=1 redirect from Stripe
+      if (location.search.includes("purchased=1")) {
+        // Re-fetch to get updated credit count
+        const r2 = await api("/auth/me");
+        if (r2 && r2.ok) {
+          const me2 = await r2.json();
+          document.getElementById("creditDisplay").textContent =
+            me2.query_credits === 1 ? "1 credit" : `${me2.query_credits} credits`;
+        }
       }
     }
 
@@ -229,23 +255,30 @@
       }
     });
 
-    document.getElementById("upgradeBtn")?.addEventListener("click", async () => {
-      const btn = document.getElementById("upgradeBtn");
-      const err = document.getElementById("upgradeError");
-      err.style.display = "none";
-      btn.disabled = true;
-      btn.textContent = "Redirecting…";
-      const r = await api("/billing/checkout", { method: "POST" });
-      if (!r) return;
-      if (r.ok) {
-        const { url } = await r.json();
-        window.location.href = url;
-      } else {
-        err.textContent = "Failed to start checkout. Please try again.";
-        err.style.display = "block";
-        btn.disabled = false;
-        btn.textContent = "Upgrade to Pro — €4/month";
-      }
+    document.querySelectorAll("[data-package]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const pkg = btn.dataset.package;
+        const err = document.getElementById("buyError");
+        err.style.display = "none";
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Redirecting…";
+
+        const r = await api("/billing/checkout", {
+          method: "POST",
+          body: JSON.stringify({ package: pkg }),
+        });
+        if (!r) { btn.disabled = false; btn.textContent = originalText; return; }
+        if (r.ok) {
+          const { url } = await r.json();
+          window.location.href = url;
+        } else {
+          err.textContent = "Failed to start checkout. Please try again.";
+          err.style.display = "block";
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      });
     });
 
     document.getElementById("logoutBtn").addEventListener("click", async () => {

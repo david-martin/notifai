@@ -21,9 +21,13 @@ def auth_client(client, db):
 
 @pytest.fixture
 def query_id(auth_client, db):
-    """Create a query owned by the authenticated user and return its ID."""
+    """Create a query owned by the authenticated user and return its ID.
+
+    Also gives the user enough credits to run the query.
+    """
     from web.models import Query, User
     user = db.query(User).filter(User.email == "user@example.com").first()
+    user.query_credits = 10  # give credits so run_now doesn't 402
     q = Query(user_id=user.id, query_text="Has Python 4.0 been officially released?", active=True)
     db.add(q)
     db.commit()
@@ -132,3 +136,49 @@ def test_run_now_uses_real_time_api_ignores_batch_flag(auth_client, query_id):
 
     mock_client.messages.create.assert_called_once()
     mock_client.messages.batches.create.assert_not_called()
+
+
+def test_run_now_returns_402_when_no_credits(auth_client, db, query_id):
+    """Run now returns 402 when the user has no query credits."""
+    from web.models import User
+    user = db.query(User).filter(User.email == "user@example.com").first()
+    user.query_credits = 0
+    db.commit()
+
+    r = auth_client.post(f"/queries/{query_id}/run")
+    assert r.status_code == 402
+    assert "credits" in r.json()["detail"].lower()
+
+
+def test_run_now_deducts_one_credit(auth_client, db, query_id):
+    """A successful run deducts exactly 1 credit."""
+    from web.models import User
+    user = db.query(User).filter(User.email == "user@example.com").first()
+    user.query_credits = 5
+    db.commit()
+
+    with patch("web.routers.queries.anthropic_client") as mock_client:
+        mock_client.messages.create.return_value = _mock_claude("NO", "Not yet.")
+        r = auth_client.post(f"/queries/{query_id}/run")
+
+    assert r.status_code == 200
+    db.expire(user)
+    db.refresh(user)
+    assert user.query_credits == 4
+
+
+def test_run_now_does_not_deduct_on_api_error(auth_client, db, query_id):
+    """A system fault (API exception) must not deduct credits."""
+    from web.models import User
+    user = db.query(User).filter(User.email == "user@example.com").first()
+    user.query_credits = 5
+    db.commit()
+
+    with patch("web.routers.queries.anthropic_client") as mock_client:
+        mock_client.messages.create.side_effect = Exception("API down")
+        r = auth_client.post(f"/queries/{query_id}/run")
+
+    assert r.status_code == 500
+    db.expire(user)
+    db.refresh(user)
+    assert user.query_credits == 5  # unchanged

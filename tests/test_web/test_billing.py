@@ -19,44 +19,109 @@ def auth_client(client, db):
 
 
 def test_checkout_requires_auth(client):
-    r = client.post("/billing/checkout")
+    r = client.post("/billing/checkout", json={"package": "small"})
     assert r.status_code == 401
 
 
-def test_checkout_returns_url(auth_client):
+def test_checkout_returns_url_small(auth_client):
     mock_session = MagicMock()
     mock_session.url = "https://checkout.stripe.com/test-session"
 
-    with patch("web.routers.billing.stripe.checkout.Session.create", return_value=mock_session):
-        r = auth_client.post("/billing/checkout")
+    with patch("web.routers.billing.stripe.checkout.Session.create", return_value=mock_session), \
+         patch.dict("os.environ", {"STRIPE_PRICE_ID_80": "price_80"}):
+        r = auth_client.post("/billing/checkout", json={"package": "small"})
 
     assert r.status_code == 200
     assert r.json()["url"] == "https://checkout.stripe.com/test-session"
 
 
-def test_checkout_stripe_error_returns_500(auth_client):
-    import stripe as stripe_mod
-    with patch("web.routers.billing.stripe.checkout.Session.create",
-               side_effect=stripe_mod.StripeError("card declined")):
-        r = auth_client.post("/billing/checkout")
+def test_checkout_returns_url_medium(auth_client):
+    mock_session = MagicMock()
+    mock_session.url = "https://checkout.stripe.com/medium-session"
 
+    with patch("web.routers.billing.stripe.checkout.Session.create", return_value=mock_session), \
+         patch.dict("os.environ", {"STRIPE_PRICE_ID_160": "price_160"}):
+        r = auth_client.post("/billing/checkout", json={"package": "medium"})
+
+    assert r.status_code == 200
+
+
+def test_checkout_returns_url_large(auth_client):
+    mock_session = MagicMock()
+    mock_session.url = "https://checkout.stripe.com/large-session"
+
+    with patch("web.routers.billing.stripe.checkout.Session.create", return_value=mock_session), \
+         patch.dict("os.environ", {"STRIPE_PRICE_ID_320": "price_320"}):
+        r = auth_client.post("/billing/checkout", json={"package": "large"})
+
+    assert r.status_code == 200
+
+
+def test_checkout_unknown_package_returns_400(auth_client):
+    with patch.dict("os.environ", {"STRIPE_PRICE_ID_80": "price_80"}):
+        r = auth_client.post("/billing/checkout", json={"package": "platinum"})
+    assert r.status_code == 400
+
+
+def test_checkout_missing_price_id_returns_500(auth_client):
+    """Missing STRIPE_PRICE_ID_80 env var → 500."""
+    import os
+    env = {k: v for k, v in os.environ.items() if k != "STRIPE_PRICE_ID_80"}
+    with patch.dict("os.environ", env, clear=True):
+        r = auth_client.post("/billing/checkout", json={"package": "small"})
     assert r.status_code == 500
 
 
-def test_webhook_upgrades_user_on_subscription_created(client, db):
-    user = User(email="sub@example.com")
+def test_checkout_stripe_error_returns_500(auth_client):
+    import stripe as stripe_mod
+    with patch("web.routers.billing.stripe.checkout.Session.create",
+               side_effect=stripe_mod.StripeError("card declined")), \
+         patch.dict("os.environ", {"STRIPE_PRICE_ID_80": "price_80"}):
+        r = auth_client.post("/billing/checkout", json={"package": "small"})
+    assert r.status_code == 500
+
+
+def test_checkout_creates_payment_session_not_subscription(auth_client):
+    """Checkout must use mode='payment', not mode='subscription'."""
+    mock_session = MagicMock()
+    mock_session.url = "https://checkout.stripe.com/pay"
+
+    with patch("web.routers.billing.stripe.checkout.Session.create", return_value=mock_session) as mock_create, \
+         patch.dict("os.environ", {"STRIPE_PRICE_ID_80": "price_80"}):
+        auth_client.post("/billing/checkout", json={"package": "small"})
+
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["mode"] == "payment"
+
+
+def test_checkout_metadata_includes_credits(auth_client):
+    """Checkout metadata must include user_id and credits."""
+    mock_session = MagicMock()
+    mock_session.url = "https://checkout.stripe.com/pay"
+
+    with patch("web.routers.billing.stripe.checkout.Session.create", return_value=mock_session) as mock_create, \
+         patch.dict("os.environ", {"STRIPE_PRICE_ID_160": "price_160"}):
+        auth_client.post("/billing/checkout", json={"package": "medium"})
+
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["metadata"]["credits"] == "160"
+    assert "user_id" in call_kwargs["metadata"]
+
+
+def test_webhook_adds_credits_on_checkout_completed(client, db):
+    user = User(email="buyer@example.com", query_credits=20)
     db.add(user)
     db.commit()
     user_id = user.id
 
     event = {
-        "type": "customer.subscription.created",
+        "type": "checkout.session.completed",
         "data": {
             "object": {
-                "id": "sub_123",
-                "customer": "cus_123",
-                "status": "active",
-                "metadata": {"user_id": user_id},
+                "mode": "payment",
+                "payment_status": "paid",
+                "customer": "cus_abc",
+                "metadata": {"user_id": user_id, "credits": "80"},
             }
         },
     }
@@ -71,25 +136,24 @@ def test_webhook_upgrades_user_on_subscription_created(client, db):
     assert r.status_code == 200
     db.expire(user)
     db.refresh(user)
-    assert user.tier == "pro"
-    assert user.stripe_customer_id == "cus_123"
-    assert user.stripe_subscription_id == "sub_123"
+    assert user.query_credits == 100  # 20 + 80
+    assert user.stripe_customer_id == "cus_abc"
 
 
-def test_webhook_upgrades_user_on_subscription_updated(client, db):
-    user = User(email="update@example.com", tier="free")
+def test_webhook_adds_160_credits(client, db):
+    user = User(email="buyer160@example.com", query_credits=0)
     db.add(user)
     db.commit()
     user_id = user.id
 
     event = {
-        "type": "customer.subscription.updated",
+        "type": "checkout.session.completed",
         "data": {
             "object": {
-                "id": "sub_456",
-                "customer": "cus_456",
-                "status": "active",
-                "metadata": {"user_id": user_id},
+                "mode": "payment",
+                "payment_status": "paid",
+                "customer": None,
+                "metadata": {"user_id": user_id, "credits": "160"},
             }
         },
     }
@@ -104,42 +168,38 @@ def test_webhook_upgrades_user_on_subscription_updated(client, db):
     assert r.status_code == 200
     db.expire(user)
     db.refresh(user)
-    assert user.tier == "pro"
+    assert user.query_credits == 160
 
 
-def test_webhook_downgrades_user_on_subscription_deleted(client, db):
-    user = User(
-        email="cancel@example.com",
-        tier="pro",
-        stripe_customer_id="cus_789",
-        stripe_subscription_id="sub_789",
-    )
+def test_webhook_ignores_subscription_events(client, db):
+    """checkout.session.completed with mode=subscription must be ignored."""
+    user = User(email="sub@example.com", query_credits=5)
     db.add(user)
     db.commit()
+    user_id = user.id
 
     event = {
-        "type": "customer.subscription.deleted",
+        "type": "checkout.session.completed",
         "data": {
             "object": {
-                "id": "sub_789",
-                "customer": "cus_789",
-                "status": "canceled",
-                "metadata": {},
+                "mode": "subscription",
+                "payment_status": "paid",
+                "customer": "cus_sub",
+                "metadata": {"user_id": user_id, "credits": "80"},
             }
         },
     }
 
     with patch("web.routers.billing.stripe.Webhook.construct_event", return_value=event):
-        r = client.post(
+        client.post(
             "/billing/webhook",
             content=json.dumps(event),
             headers={"stripe-signature": "test-sig"},
         )
 
-    assert r.status_code == 200
     db.expire(user)
     db.refresh(user)
-    assert user.tier == "free"
+    assert user.query_credits == 5  # unchanged
 
 
 def test_webhook_invalid_signature_returns_400(client):

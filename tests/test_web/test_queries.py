@@ -57,19 +57,11 @@ def test_delete_query(auth_client):
     assert auth_client.get("/queries").json() == []
 
 
-def test_free_tier_limit_two_active_queries(auth_client):
-    auth_client.post("/queries", json={"query_text": "Is this Q1 a test?"})
-    auth_client.post("/queries", json={"query_text": "Is this Q2 a test?"})
-    response = auth_client.post("/queries", json={"query_text": "Is this Q3 a test?"})
-    assert response.status_code == 429
-
-
-def test_free_tier_limit_allows_after_toggle_inactive(auth_client):
-    r1 = auth_client.post("/queries", json={"query_text": "Is this Q1 a test?"})
-    r2 = auth_client.post("/queries", json={"query_text": "Is this Q2 a test?"})
-    auth_client.patch(f"/queries/{r1.json()['id']}", json={"active": False})
-    response = auth_client.post("/queries", json={"query_text": "Is this Q3 a test?"})
-    assert response.status_code == 201
+def test_can_create_many_queries(auth_client):
+    """No active query limit — users can create as many queries as they want."""
+    for i in range(5):
+        r = auth_client.post("/queries", json={"query_text": f"Is this Q{i} a test?"})
+        assert r.status_code == 201
 
 
 def test_cannot_access_other_users_query(client, db):

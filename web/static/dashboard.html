@@ -366,7 +366,10 @@
     <div class="header-actions">
       <span class="email-display" id="userEmail"></span>
       <a href="/history.html" style="color:var(--muted);font-size:0.875rem;text-decoration:none;">History</a>
-      <a href="/account.html" style="color:var(--muted);font-size:0.875rem;text-decoration:none;">Account</a>
+      <a href="/account.html" style="color:var(--muted);font-size:0.875rem;text-decoration:none;" title="Buy more credits">
+        <span id="creditBadge" style="color:var(--muted);font-size:0.875rem;"></span>
+        Account
+      </a>
       <button class="btn-link" id="logoutBtn">Sign out</button>
     </div>
   </header>
@@ -462,6 +465,12 @@
       const me = await meRes.json();
       document.getElementById("userEmail").textContent = me.email;
       userTier = me.tier;
+      const credits = me.query_credits ?? 0;
+      document.getElementById("creditBadge").textContent =
+        credits === 0 ? "⚠ 0 credits · " : `${credits} credits · `;
+      if (credits === 0) {
+        document.getElementById("creditBadge").style.color = "var(--yellow)";
+      }
       await loadQueries();
     }
 
@@ -476,7 +485,6 @@
       const list = document.getElementById("queryList");
       const notice = document.getElementById("limitNotice");
       const activeCount = queries.filter(q => q.active).length;
-      const limit = userTier === "free" ? 2 : null;
 
       if (queries.length === 0) {
         list.innerHTML = `<div class="empty-state"><strong>No queries yet.</strong><p>Add one above to get started.</p></div>`;
@@ -502,14 +510,8 @@
         </div>
       `).join("");
 
-      if (limit) {
-        notice.textContent = `${activeCount} of ${limit} active queries used (free tier)`;
-      } else {
-        notice.textContent = "";
-      }
-
-      const atLimit = limit && activeCount >= limit;
-      document.getElementById("newQueryBtn").disabled = atLimit;
+      notice.textContent = "";
+      document.getElementById("newQueryBtn").disabled = false;
     }
 
     function escHtml(s) {
@@ -549,6 +551,14 @@
         const panel = document.createElement("div");
         panel.className = "run-now-result";
         panel.innerHTML = `<div class="rn-answer no">Rate limit reached — try again in an hour.</div>`;
+        card.querySelector(".query-body").appendChild(panel);
+        return;
+      }
+
+      if (r.status === 402) {
+        const panel = document.createElement("div");
+        panel.className = "run-now-result";
+        panel.innerHTML = `<div class="rn-answer no">No credits remaining. <a href="/account.html">Buy credits</a> to continue.</div>`;
         card.querySelector(".query-body").appendChild(panel);
         return;
       }

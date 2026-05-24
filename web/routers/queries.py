@@ -17,8 +17,6 @@ from web.models import NotificationLog, Query, User
 router = APIRouter(prefix="/queries", tags=["queries"])
 
 # Configuration — read from env with sensible defaults.
-FREE_TIER_QUERY_LIMIT = int(os.environ.get("FREE_TIER_QUERY_LIMIT", "2"))
-FREE_TIER_CREATION_LIMIT = int(os.environ.get("FREE_TIER_CREATION_LIMIT", "10"))
 ASSIST_MODEL = os.environ.get("NOTIFAI_ASSIST_MODEL", "claude-haiku-4-5-20251001")
 
 anthropic_client = anthropic.Anthropic()
@@ -115,23 +113,6 @@ class DescriptionRequest(BaseModel):
     description: str = Field(..., min_length=1, max_length=600)
 
 
-def _active_count(db: DBSession, user_id: str) -> int:
-    return db.query(Query).filter(Query.user_id == user_id, Query.active == True).count()
-
-
-def _check_and_increment_attempts(db: DBSession, user: User) -> None:
-    today = date.today()
-    month_start = today.replace(day=1)
-    if user.creation_attempts_reset_at != month_start:
-        user.creation_attempts_this_month = 0
-        user.creation_attempts_reset_at = month_start
-    if user.creation_attempts_this_month >= FREE_TIER_CREATION_LIMIT:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Monthly query creation limit ({FREE_TIER_CREATION_LIMIT}) reached.",
-        )
-    user.creation_attempts_this_month += 1
-    db.commit()
 
 
 def _call_haiku(system: str, user_message: str) -> dict:
@@ -162,12 +143,10 @@ def validate_description(
     request: Request,
     body: DescriptionRequest,
     user: User = Depends(get_current_user),
-    db: DBSession = Depends(get_db),
 ):
     rejection = _pre_guard(body.description)
     if rejection:
         return {"valid": False, "feedback": rejection}
-    _check_and_increment_attempts(db, user)
     result = _call_haiku(COMBINED_SYSTEM_PROMPT, body.description)
     valid = result.get("valid", False)
     response: dict = {"valid": valid, "feedback": result.get("feedback", "")}
@@ -207,12 +186,6 @@ def create_query(
     user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
-    limit = FREE_TIER_QUERY_LIMIT if user.tier == "free" else 999
-    if _active_count(db, user.id) >= limit:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Free tier allows {FREE_TIER_QUERY_LIMIT} active queries. Deactivate one or upgrade.",
-        )
     q = Query(user_id=user.id, query_text=body.query_text)
     db.add(q)
     db.commit()
@@ -314,10 +287,18 @@ def run_query_now(
     """Run a single query immediately using the real-time API.
 
     Always uses the real-time API regardless of NOTIFAI_USE_BATCH.
+    Costs 1 credit on successful completion. Returns 402 if the user has no credits.
+    System faults (API error, no text block, malformed JSON) do NOT deduct credits.
     Sends an email on YES — same as the scheduled runner.
     Does NOT auto-deactivate the query even if the answer is YES.
     """
     q = _get_owned_query(db, query_id, user)
+
+    if user.query_credits <= 0:
+        raise HTTPException(
+            status_code=402,
+            detail="No query credits remaining. Purchase more credits to continue.",
+        )
 
     model = os.environ.get("NOTIFAI_MODEL", "claude-sonnet-4-6")
     _ttl_secs = int(os.environ.get("NOTIFAI_CACHE_TTL", "3600"))
@@ -368,6 +349,10 @@ def run_query_now(
     reason = result.get("reason", "")
     sources = result.get("sources", [])
     email_sent = False
+
+    # Deduct 1 credit — only reached on a valid API response (errors return early above).
+    user.query_credits = max(0, user.query_credits - 1)
+    db.commit()
 
     if answer == "YES":
         from_email = os.environ.get("RESEND_FROM_EMAIL", "")

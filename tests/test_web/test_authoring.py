@@ -86,31 +86,6 @@ def test_validate_returns_query_text_when_valid(auth_client):
     mock_client.messages.create.assert_called_once()
 
 
-def test_validate_increments_attempt_counter(auth_client, db):
-    mock_resp = _mock_haiku({"valid": True, "feedback": "OK", "query_text": "Has Brent crude fallen below $60?"})
-    with patch("web.routers.queries.anthropic_client") as mock_client:
-        mock_client.messages.create.return_value = mock_resp
-        auth_client.post("/queries/validate", json={"description": "Oil prices fall below sixty dollars per barrel"})
-
-    me = auth_client.get("/auth/me").json()
-    from web.models import User
-    user = db.query(User).filter(User.id == me["id"]).first()
-    assert user.creation_attempts_this_month == 1
-
-
-def test_validate_blocks_at_attempt_limit(auth_client, db):
-    from datetime import date
-    me = auth_client.get("/auth/me").json()
-    from web.models import User
-    from web.routers.queries import FREE_TIER_CREATION_LIMIT
-    user = db.query(User).filter(User.id == me["id"]).first()
-    user.creation_attempts_this_month = FREE_TIER_CREATION_LIMIT
-    user.creation_attempts_reset_at = date.today().replace(day=1)
-    db.commit()
-
-    response = auth_client.post("/queries/validate", json={"description": "Oil prices fall below sixty dollars per barrel"})
-    assert response.status_code == 429
-
 
 def test_validate_requires_auth(client):
     response = client.post("/queries/validate", json={"description": "test"})

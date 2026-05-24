@@ -19,7 +19,10 @@ class User(Base):
     id = Column(String(36), primary_key=True, default=_uuid)
     email = Column(String, unique=True, nullable=False, index=True)
     notify_email = Column(String, nullable=True)
-    tier = Column(String, nullable=False, default="free")
+    tier = Column(String, nullable=False, default="free")  # legacy, kept for migration
+    # Query credits: each scheduled or on-demand check costs 1 credit.
+    # Purchased in one-time Stripe blocks (80 / 160 / 320). New accounts start at 0.
+    query_credits = Column(Integer, nullable=False, default=0)
     creation_attempts_this_month = Column(Integer, nullable=False, default=0)
     creation_attempts_reset_at = Column(Date, nullable=True)
     stripe_customer_id = Column(String, nullable=True)

@@ -38,7 +38,7 @@ def runner_db():
 
 @pytest.fixture
 def user_with_query(runner_db):
-    user = User(email="test@example.com", notify_email="test@example.com")
+    user = User(email="test@example.com", notify_email="test@example.com", query_credits=10)
     runner_db.add(user)
     runner_db.flush()
     query = Query(
@@ -107,7 +107,7 @@ def test_run_silent_on_no(user_with_query, runner_db):
 
 
 def test_run_skips_inactive_queries(runner_db):
-    user = User(email="test@example.com", notify_email="test@example.com")
+    user = User(email="test@example.com", notify_email="test@example.com", query_credits=10)
     runner_db.add(user)
     runner_db.flush()
     query = Query(user_id=user.id, query_text="Q?", active=False)
@@ -123,8 +123,72 @@ def test_run_skips_inactive_queries(runner_db):
     MockClient.return_value.messages.create.assert_not_called()
 
 
+def test_run_skips_users_with_no_credits(runner_db):
+    """Users with query_credits=0 are not checked."""
+    user = User(email="broke@example.com", notify_email="broke@example.com", query_credits=0)
+    runner_db.add(user)
+    runner_db.flush()
+    query = Query(user_id=user.id, query_text="Q?", active=True)
+    runner_db.add(query)
+    runner_db.commit()
+
+    with patch("web.runner.anthropic.Anthropic") as MockClient, \
+         patch("web.runner.resend.Emails.send"), \
+         patch("web.runner.get_session", return_value=runner_db):
+        from web.runner import run_checks
+        run_checks()
+
+    MockClient.return_value.messages.create.assert_not_called()
+
+
+def test_run_deducts_one_credit(user_with_query, runner_db):
+    """Each successful check deducts exactly 1 credit from the user."""
+    user, _ = user_with_query
+    user_id = user.id
+    initial_credits = user.query_credits
+    mock_resp = _mock_claude_response("NO", "Not yet.", [])
+
+    with patch("web.runner.anthropic.Anthropic") as MockClient, \
+         patch("web.runner.resend.Emails.send"), \
+         patch("web.runner.get_session", return_value=runner_db):
+        MockClient.return_value.messages.create.return_value = mock_resp
+        from web.runner import run_checks
+        run_checks()
+
+    # run_checks() closes the session — re-query for fresh state
+    refreshed = runner_db.query(User).filter(User.id == user_id).first()
+    assert refreshed.query_credits == initial_credits - 1
+
+
+def test_run_does_not_deduct_on_malformed_json(runner_db):
+    """A malformed JSON response must not deduct credits."""
+    user = User(email="nodeduce@example.com", notify_email="nodeduce@example.com", query_credits=5)
+    runner_db.add(user)
+    runner_db.flush()
+    query = Query(user_id=user.id, query_text="Q?", active=True)
+    runner_db.add(query)
+    runner_db.commit()
+    user_id = user.id
+
+    bad_block = MagicMock()
+    bad_block.text = "not json at all"
+    bad_resp = MagicMock()
+    bad_resp.content = [bad_block]
+
+    with patch("web.runner.anthropic.Anthropic") as MockClient, \
+         patch("web.runner.resend.Emails.send"), \
+         patch("web.runner.get_session", return_value=runner_db):
+        MockClient.return_value.messages.create.return_value = bad_resp
+        from web.runner import run_checks
+        run_checks()
+
+    # run_checks() closes the session — re-query for fresh state
+    refreshed = runner_db.query(User).filter(User.id == user_id).first()
+    assert refreshed.query_credits == 5  # unchanged
+
+
 def test_run_continues_after_malformed_json(runner_db):
-    user = User(email="test@example.com", notify_email="test@example.com")
+    user = User(email="test@example.com", notify_email="test@example.com", query_credits=10)
     runner_db.add(user)
     runner_db.flush()
     for i in range(2):

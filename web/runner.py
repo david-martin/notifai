@@ -104,7 +104,18 @@ def _run(db):
     from_email = _require_env("RESEND_FROM_EMAIL")
     today = date.today().isoformat()
 
-    queries = db.query(Query).filter(Query.active == True).all()
+    # Only run queries for users who have credits remaining.
+    # Users at 0 credits are skipped until they purchase more.
+    queries = (
+        db.query(Query)
+        .join(User, Query.user_id == User.id)
+        .filter(Query.active == True, User.query_credits > 0)
+        .all()
+    )
+
+    if not queries:
+        print("[runner] No active queries with credits to process.")
+        return
 
     if USE_BATCH and queries:
         _run_batch(client, db, queries, today, from_email)
@@ -113,7 +124,15 @@ def _run(db):
 
 
 def _handle_result(db, q, user, result_dict, from_email):
-    """Process a single query result: send email if YES, auto-deactivate, log."""
+    """Process a single query result: send email if YES, auto-deactivate, log.
+
+    Called only when the API returned a valid parsed response — not on errors.
+    Deducts 1 credit per call (system faults return early before reaching here).
+    """
+    # Deduct 1 credit for this execution.
+    user.query_credits = max(0, user.query_credits - 1)
+    db.commit()
+
     answer = result_dict.get("answer", "NO")
     reason = result_dict.get("reason", "")
     sources = result_dict.get("sources", [])
