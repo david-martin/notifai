@@ -85,10 +85,12 @@ async def stripe_webhook(request: Request, db: DBSession = Depends(get_db)):
 
     if event["type"] == "checkout.session.completed":
         obj = event["data"]["object"]
-        # Only process one-time payment sessions that have been paid.
-        if obj.get("mode") == "payment" and obj.get("payment_status") == "paid":
-            user_id = obj.get("metadata", {}).get("user_id")
-            credits_str = obj.get("metadata", {}).get("credits", "0")
+        # Use obj["key"] not obj.get() — Stripe SDK v5 StripeObjects are typed
+        # classes that don't expose .get(); dict-style [] access is what works.
+        if obj["mode"] == "payment" and obj["payment_status"] == "paid":
+            metadata = obj["metadata"]  # always present; empty if none set
+            user_id = metadata["user_id"] if "user_id" in metadata else None
+            credits_str = metadata["credits"] if "credits" in metadata else "0"
             try:
                 credits = int(credits_str)
             except (ValueError, TypeError):
@@ -99,13 +101,14 @@ async def stripe_webhook(request: Request, db: DBSession = Depends(get_db)):
             if user_id:
                 user = db.query(User).filter(User.id == user_id).first()
             if not user:
-                customer_id = obj.get("customer")
+                customer_id = obj["customer"]
                 if customer_id:
                     user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
 
             if user:
-                if obj.get("customer") and not user.stripe_customer_id:
-                    user.stripe_customer_id = obj.get("customer")
+                customer_id = obj["customer"]
+                if customer_id and not user.stripe_customer_id:
+                    user.stripe_customer_id = customer_id
                 user.query_credits += credits
                 db.commit()
                 logger.info(
