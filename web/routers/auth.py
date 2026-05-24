@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Optional
 
@@ -18,6 +19,8 @@ from web.auth import (
 from web.database import get_db
 from web.limiter import limiter
 from web.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -40,6 +43,7 @@ def request_magic_link(request: Request, body: EmailRequest, db: DBSession = Dep
     user = get_or_create_user(db, body.email)
     token = create_magic_link(db, user)
     send_magic_link_email(body.email, token)
+    logger.info("magic_link_requested email=%s", body.email)
     return {"message": "Check your email for a sign-in link."}
 
 
@@ -48,8 +52,10 @@ def request_magic_link(request: Request, body: EmailRequest, db: DBSession = Dep
 def verify(request: Request, token: str, response: Response, db: DBSession = Depends(get_db)):
     user = verify_magic_link(db, token)
     if not user:
+        logger.warning("magic_link_invalid_or_expired")
         raise HTTPException(status_code=400, detail="Invalid or expired sign-in link.")
     session_id = create_session(db, user)
+    logger.info("session_created user_id=%s email=%s", user.id, user.email)
     redirect = RedirectResponse(url="/dashboard.html", status_code=302)
     redirect.set_cookie(
         key=SESSION_COOKIE,
@@ -101,5 +107,6 @@ def logout(
 ):
     if session_id:
         delete_session(db, session_id)
+        logger.info("session_deleted")
     response.delete_cookie(SESSION_COOKIE)
     return {"message": "Logged out."}
