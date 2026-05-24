@@ -286,48 +286,78 @@ def _parse_runner_result(text: str) -> dict:
     return json.loads(text)
 
 
-# Strings that appear in tool_result content when Anthropic's web search fails.
-# Covers both is_error=True (tool execution error) and is_error=False (rate limit,
-# service unavailable) failure modes.
-_SEARCH_FAILURE_STRINGS = (
-    "rate limit",
-    "tool execution error",
-    "tool is currently unavailable",
-    "web search is currently unavailable",
-    "unable to retrieve current web results",
-    "search could not be completed",
-    "unable to perform web search",
-)
+def _log_search_blocks(content_blocks, query_id: str) -> None:
+    """Log web search result details for each web_search_tool_result block."""
+    for block in content_blocks:
+        if getattr(block, "type", None) != "web_search_tool_result":
+            continue
+        content = getattr(block, "content", None)
+        if content is None:
+            logger.warning("web_search_no_content query_id=%s", query_id)
+            continue
+        content_type = getattr(content, "type", None)
+        if content_type == "web_search_tool_result_error":
+            error_code = getattr(content, "error_code", "unknown")
+            logger.warning("web_search_error query_id=%s error_code=%s", query_id, error_code)
+        elif isinstance(content, list):
+            logger.info("web_search_results query_id=%s count=%d", query_id, len(content))
+            for item in content[:5]:
+                title = getattr(item, "title", "?")
+                url = getattr(item, "url", "?")
+                logger.info("web_search_result query_id=%s title=%.80s url=%.120s", query_id, title, url)
+        else:
+            logger.warning("web_search_unexpected_content query_id=%s content_type=%s", query_id, type(content).__name__)
 
 
 def _has_search_failure(content_blocks) -> str | None:
-    """Return the failure text if the response contains a web search failure, else None.
+    """Return a failure description if the response contains a web search failure, else None.
 
-    Checks both the is_error flag (tool execution error) and the text content
-    of tool_result blocks (rate-limiting, service unavailable).
+    Handles both:
+    - web_search_tool_result blocks (server tool, web_search_20260209): checks for a
+      typed WebSearchToolResultError with an error_code
+    - tool_result blocks (legacy client-side tool pattern): checks is_error flag and
+      known failure strings in the content text
     """
     for block in content_blocks:
-        if getattr(block, "type", None) != "tool_result":
-            continue
-        if getattr(block, "is_error", False):
-            tool_id = getattr(block, "tool_use_id", "?")
-            return f"tool_result is_error=True tool_use_id={tool_id}"
-        # Also inspect content text for known failure strings.
-        raw = getattr(block, "content", "")
-        if isinstance(raw, str):
-            text = raw
-        elif isinstance(raw, list):
-            parts = []
-            for item in raw:
-                if isinstance(item, dict):
-                    parts.append(item.get("text", ""))
-                else:
-                    parts.append(getattr(item, "text", "") or "")
-            text = " ".join(parts)
-        else:
-            text = str(raw) if raw else ""
-        if any(s in text.lower() for s in _SEARCH_FAILURE_STRINGS):
-            return text
+        block_type = getattr(block, "type", None)
+
+        if block_type == "web_search_tool_result":
+            # Server tool result — content is either WebSearchToolResultError or a list of results.
+            content = getattr(block, "content", None)
+            if content is None:
+                continue
+            content_type = getattr(content, "type", None)
+            if content_type == "web_search_tool_result_error":
+                error_code = getattr(content, "error_code", "unknown")
+                return f"web_search_tool_result_error error_code={error_code}"
+            # A list of results (even empty) is not a failure — the search ran.
+
+        elif block_type == "tool_result":
+            # Legacy client-side tool_result block.
+            if getattr(block, "is_error", False):
+                tool_id = getattr(block, "tool_use_id", "?")
+                return f"tool_result is_error=True tool_use_id={tool_id}"
+            raw = getattr(block, "content", "")
+            if isinstance(raw, str):
+                text = raw
+            elif isinstance(raw, list):
+                parts = []
+                for item in raw:
+                    if isinstance(item, dict):
+                        parts.append(item.get("text", ""))
+                    else:
+                        parts.append(getattr(item, "text", "") or "")
+                text = " ".join(parts)
+            else:
+                text = str(raw) if raw else ""
+            _LEGACY_FAILURE_STRINGS = (
+                "rate limit", "tool execution error", "tool is currently unavailable",
+                "web search is currently unavailable", "unable to retrieve current web results",
+                "search could not be completed", "unable to perform web search",
+            )
+            if any(s in text.lower() for s in _LEGACY_FAILURE_STRINGS):
+                return text
+
     return None
 
 
@@ -401,6 +431,8 @@ def run_query_now(
     except Exception as exc:
         logger.error("api_error query_id=%s exc=%s", query_id, exc)
         raise HTTPException(status_code=500, detail="API error. Please try again.")
+
+    _log_search_blocks(response.content, query_id)
 
     # Detect web search failures (tool execution error OR rate limit / unavailable).
     # These are system faults — do NOT deduct a credit.

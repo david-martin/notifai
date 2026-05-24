@@ -58,40 +58,75 @@ def get_session():
     return SessionLocal()
 
 
-_SEARCH_FAILURE_STRINGS = (
-    "rate limit",
-    "tool execution error",
-    "tool is currently unavailable",
-    "web search is currently unavailable",
-    "unable to retrieve current web results",
-    "search could not be completed",
-    "unable to perform web search",
-)
+def _log_search_blocks(content_blocks, query_id: str) -> None:
+    """Log web search result details for each web_search_tool_result block."""
+    for block in content_blocks:
+        if getattr(block, "type", None) != "web_search_tool_result":
+            continue
+        content = getattr(block, "content", None)
+        if content is None:
+            logger.warning("web_search_no_content query_id=%s", query_id)
+            continue
+        content_type = getattr(content, "type", None)
+        if content_type == "web_search_tool_result_error":
+            error_code = getattr(content, "error_code", "unknown")
+            logger.warning("web_search_error query_id=%s error_code=%s", query_id, error_code)
+        elif isinstance(content, list):
+            logger.info("web_search_results query_id=%s count=%d", query_id, len(content))
+            for item in content[:5]:
+                title = getattr(item, "title", "?")
+                url = getattr(item, "url", "?")
+                logger.info("web_search_result query_id=%s title=%.80s url=%.120s", query_id, title, url)
+        else:
+            logger.warning("web_search_unexpected_content query_id=%s content_type=%s", query_id, type(content).__name__)
 
 
 def _has_search_failure(content_blocks) -> str | None:
-    """Return the failure text if the response contains a web search failure, else None."""
+    """Return a failure description if the response contains a web search failure, else None.
+
+    Handles both:
+    - web_search_tool_result blocks (server tool, web_search_20260209): checks for a
+      typed WebSearchToolResultError with an error_code
+    - tool_result blocks (legacy client-side tool pattern): checks is_error flag and
+      known failure strings in the content text
+    """
     for block in content_blocks:
-        if getattr(block, "type", None) != "tool_result":
-            continue
-        if getattr(block, "is_error", False):
-            tool_id = getattr(block, "tool_use_id", "?")
-            return f"tool_result is_error=True tool_use_id={tool_id}"
-        raw = getattr(block, "content", "")
-        if isinstance(raw, str):
-            text = raw
-        elif isinstance(raw, list):
-            parts = []
-            for item in raw:
-                if isinstance(item, dict):
-                    parts.append(item.get("text", ""))
-                else:
-                    parts.append(getattr(item, "text", "") or "")
-            text = " ".join(parts)
-        else:
-            text = str(raw) if raw else ""
-        if any(s in text.lower() for s in _SEARCH_FAILURE_STRINGS):
-            return text
+        block_type = getattr(block, "type", None)
+
+        if block_type == "web_search_tool_result":
+            content = getattr(block, "content", None)
+            if content is None:
+                continue
+            content_type = getattr(content, "type", None)
+            if content_type == "web_search_tool_result_error":
+                error_code = getattr(content, "error_code", "unknown")
+                return f"web_search_tool_result_error error_code={error_code}"
+
+        elif block_type == "tool_result":
+            if getattr(block, "is_error", False):
+                tool_id = getattr(block, "tool_use_id", "?")
+                return f"tool_result is_error=True tool_use_id={tool_id}"
+            raw = getattr(block, "content", "")
+            if isinstance(raw, str):
+                text = raw
+            elif isinstance(raw, list):
+                parts = []
+                for item in raw:
+                    if isinstance(item, dict):
+                        parts.append(item.get("text", ""))
+                    else:
+                        parts.append(getattr(item, "text", "") or "")
+                text = " ".join(parts)
+            else:
+                text = str(raw) if raw else ""
+            _LEGACY_FAILURE_STRINGS = (
+                "rate limit", "tool execution error", "tool is currently unavailable",
+                "web search is currently unavailable", "unable to retrieve current web results",
+                "search could not be completed", "unable to perform web search",
+            )
+            if any(s in text.lower() for s in _LEGACY_FAILURE_STRINGS):
+                return text
+
     return None
 
 
@@ -247,6 +282,8 @@ def _run_sequential(client, db, queries, today, from_email):
             logger.error("api_error query_id=%s exc=%s", q.id, e)
             continue
 
+        _log_search_blocks(response.content, str(q.id))
+
         # Skip on web search failure (execution error or rate limit) — no credit deduction.
         failure = _has_search_failure(response.content)
         if failure:
@@ -322,6 +359,8 @@ def _run_batch(client, db, queries, today, from_email):
             result.custom_id, response.stop_reason, block_types,
             response.usage.input_tokens, response.usage.output_tokens,
         )
+
+        _log_search_blocks(response.content, result.custom_id)
 
         # Skip on web search failure (execution error or rate limit) — no credit deduction.
         failure = _has_search_failure(response.content)
