@@ -53,6 +53,9 @@ class Query(Base):
     query_text = Column(String, nullable=False)
     active = Column(Boolean, nullable=False, default=True)
     notify_on_no = Column(Boolean, nullable=False, default=False)
+    # completed=True means the runner answered YES and auto-deactivated the query.
+    # Distinct from active=False (manually paused). User can re-enable either way.
+    completed = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=_now)
 
 

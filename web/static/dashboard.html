@@ -109,6 +109,21 @@
       transition: background 0.15s;
     }
     .btn-secondary:hover { background: var(--border); }
+    .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; border-radius: 6px; }
+
+    .run-now-result {
+      margin-top: 0.5rem;
+      padding: 0.6rem 0.75rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+    .run-now-result .rn-answer { font-weight: 700; margin-bottom: 0.2rem; }
+    .run-now-result .rn-answer.yes { color: #34c759; }
+    .run-now-result .rn-answer.no { color: var(--muted); }
+    .run-now-result .rn-reason { color: var(--text); margin-bottom: 0.25rem; }
+    .run-now-result .rn-history { font-size: 0.75rem; color: var(--muted); }
 
     .btn-danger {
       background: none;
@@ -196,6 +211,7 @@
     }
     .status-badge.active { background: rgba(108,142,247,0.15); color: var(--accent); }
     .status-badge.paused { background: rgba(123,127,148,0.15); color: var(--muted); }
+    .status-badge.completed { background: rgba(52,199,89,0.15); color: #34c759; }
 
     /* Create flow */
     .create-panel {
@@ -478,7 +494,8 @@
           <div class="query-body">
             <div class="query-text">${escHtml(q.query_text)}</div>
             <div class="query-meta">
-              <span class="status-badge ${q.active ? "active" : "paused"}">${q.active ? "Active" : "Paused"}</span>
+              <span class="status-badge ${q.active ? "active" : q.completed ? "completed" : "paused"}">${q.active ? "Active" : q.completed ? "Completed" : "Paused"}</span>
+              <button class="btn-secondary btn-sm" onclick="runNow('${q.id}', this)">Run now</button>
               <button class="btn-danger" onclick="deleteQuery('${q.id}')">Remove</button>
             </div>
           </div>
@@ -511,6 +528,49 @@
       if (!confirm("Remove this query?")) return;
       await api(`/queries/${id}`, { method: "DELETE" });
       await loadQueries();
+    }
+
+    async function runNow(id, btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span>`;
+
+      // Remove any previous result panel for this card
+      const card = btn.closest(".query-card");
+      const prev = card.querySelector(".run-now-result");
+      if (prev) prev.remove();
+
+      const r = await api(`/queries/${id}/run`, { method: "POST" });
+      btn.disabled = false;
+      btn.textContent = "Run now";
+
+      if (!r) return;
+
+      if (r.status === 429) {
+        const panel = document.createElement("div");
+        panel.className = "run-now-result";
+        panel.innerHTML = `<div class="rn-answer no">Rate limit reached — try again in an hour.</div>`;
+        card.querySelector(".query-body").appendChild(panel);
+        return;
+      }
+
+      if (!r.ok) {
+        const panel = document.createElement("div");
+        panel.className = "run-now-result";
+        panel.innerHTML = `<div class="rn-answer no">Error running query. Please try again.</div>`;
+        card.querySelector(".query-body").appendChild(panel);
+        return;
+      }
+
+      const data = await r.json();
+      const isYes = data.answer === "YES";
+      const panel = document.createElement("div");
+      panel.className = "run-now-result";
+      panel.innerHTML = `
+        <div class="rn-answer ${isYes ? "yes" : "no"}">${isYes ? "✓ YES" : "✗ NO"}</div>
+        <div class="rn-reason">${escHtml(data.reason || "")}</div>
+        <div class="rn-history"><a href="history.html">View in history</a></div>
+      `;
+      card.querySelector(".query-body").appendChild(panel);
     }
 
     // Create flow
@@ -585,7 +645,13 @@
           fb.className = "feedback-box valid";
           fb.textContent = data.feedback;
           fb.style.display = "block";
-          await runGenerate(desc, btn, errEl);
+          // query_text comes directly in the validate response — no second API call needed
+          generatedQuery = { query_text: data.query_text };
+          document.getElementById("previewQuery").textContent = data.query_text;
+          document.getElementById("step1").style.display = "none";
+          document.getElementById("step2").style.display = "block";
+          btn.disabled = false;
+          btn.textContent = "Check & continue";
         } else if (data.reframed) {
           // Reframe suggestion — show it, hide the validate button
           fb.className = "feedback-box invalid";
@@ -611,31 +677,6 @@
       }
     });
 
-    async function runGenerate(desc, btn, errEl) {
-      btn.disabled = true;
-      btn.innerHTML = `<span class="spinner"></span>Generating…`;
-      const gr = await api("/queries/generate", {
-        method: "POST",
-        body: JSON.stringify({ description: desc }),
-      });
-      if (!gr) return;
-
-      if (gr.status === 429) {
-        errEl.textContent = "Monthly creation limit reached.";
-        errEl.style.display = "block";
-        btn.disabled = false;
-        btn.textContent = "Check & continue";
-        return;
-      }
-
-      generatedQuery = await gr.json();
-      document.getElementById("previewQuery").textContent = generatedQuery.query_text;
-      document.getElementById("step1").style.display = "none";
-      document.getElementById("step2").style.display = "block";
-      btn.disabled = false;
-      btn.textContent = "Check & continue";
-    }
-
     document.getElementById("useReframeBtn").addEventListener("click", async () => {
       const reframed = document.getElementById("reframeText").textContent;
       const btn = document.getElementById("validateBtn");
@@ -644,7 +685,41 @@
       document.getElementById("reframeBox").style.display = "none";
       document.getElementById("feedbackBox").style.display = "none";
       errEl.style.display = "none";
-      await runGenerate(reframed, btn, errEl);
+      document.getElementById("validateBtn").style.display = "";
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span>Generating…`;
+
+      try {
+        const r = await api("/queries/validate", {
+          method: "POST",
+          body: JSON.stringify({ description: reframed }),
+        });
+        if (!r) return;
+
+        if (r.status === 429) {
+          errEl.textContent = "Monthly creation limit reached.";
+          errEl.style.display = "block";
+          btn.disabled = false;
+          btn.textContent = "Check & continue";
+          return;
+        }
+
+        const data = await r.json();
+        if (data.valid && data.query_text) {
+          generatedQuery = { query_text: data.query_text };
+          document.getElementById("previewQuery").textContent = data.query_text;
+          document.getElementById("step1").style.display = "none";
+          document.getElementById("step2").style.display = "block";
+        } else {
+          errEl.textContent = data.feedback || "Could not generate query. Please try again.";
+          errEl.style.display = "block";
+        }
+      } catch (_) {
+        errEl.textContent = "Network error. Please try again.";
+        errEl.style.display = "block";
+      }
+      btn.disabled = false;
+      btn.textContent = "Check & continue";
     });
 
     document.getElementById("editInsteadBtn").addEventListener("click", () => {

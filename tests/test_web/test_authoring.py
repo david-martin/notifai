@@ -25,12 +25,19 @@ def _mock_haiku(answer: dict):
 
 
 def test_validate_accepts_good_description(auth_client):
-    mock_resp = _mock_haiku({"valid": True, "feedback": "Looks good."})
+    mock_resp = _mock_haiku({
+        "valid": True,
+        "feedback": "Looks good.",
+        "query_text": "Has Brent crude fallen below $80 per barrel as of today?",
+    })
     with patch("web.routers.queries.anthropic_client") as mock_client:
         mock_client.messages.create.return_value = mock_resp
         response = auth_client.post("/queries/validate", json={"description": "Tell me when oil is cheap"})
     assert response.status_code == 200
-    assert response.json()["valid"] is True
+    data = response.json()
+    assert data["valid"] is True
+    assert "query_text" in data
+    assert data["query_text"] == "Has Brent crude fallen below $80 per barrel as of today?"
 
 
 def test_validate_rejects_bad_description(auth_client):
@@ -62,18 +69,25 @@ def test_validate_returns_reframed_for_question_phrasing(auth_client):
     assert "Slieverue" in data["reframed"]
 
 
-def test_generate_returns_query_fields(auth_client):
-    mock_resp = _mock_haiku({"query_text": "Has Brent crude fallen below $80?"})
+def test_validate_returns_query_text_when_valid(auth_client):
+    mock_resp = _mock_haiku({
+        "valid": True,
+        "feedback": "Clear and checkable.",
+        "query_text": "Has Brent crude fallen below $80?",
+    })
     with patch("web.routers.queries.anthropic_client") as mock_client:
         mock_client.messages.create.return_value = mock_resp
-        response = auth_client.post("/queries/generate", json={"description": "Tell me when oil is cheap"})
+        response = auth_client.post("/queries/validate", json={"description": "Tell me when oil is cheap"})
     assert response.status_code == 200
     data = response.json()
+    assert data["valid"] is True
     assert data["query_text"] == "Has Brent crude fallen below $80?"
+    # Single API call — no separate generate endpoint needed
+    mock_client.messages.create.assert_called_once()
 
 
 def test_validate_increments_attempt_counter(auth_client, db):
-    mock_resp = _mock_haiku({"valid": True, "feedback": "OK"})
+    mock_resp = _mock_haiku({"valid": True, "feedback": "OK", "query_text": "Has Brent crude fallen below $60?"})
     with patch("web.routers.queries.anthropic_client") as mock_client:
         mock_client.messages.create.return_value = mock_resp
         auth_client.post("/queries/validate", json={"description": "Oil prices fall below sixty dollars per barrel"})
@@ -167,7 +181,11 @@ def test_pre_guard_does_not_increment_attempts(auth_client, db):
 
 
 def test_pre_guard_passes_legitimate_input(auth_client):
-    mock_resp = _mock_haiku({"valid": True, "feedback": "Looks good."})
+    mock_resp = _mock_haiku({
+        "valid": True,
+        "feedback": "Looks good.",
+        "query_text": "Has Brent crude fallen below $60 per barrel as of today?",
+    })
     with patch("web.routers.queries.anthropic_client") as mock_client:
         mock_client.messages.create.return_value = mock_resp
         response = auth_client.post("/queries/validate", json={

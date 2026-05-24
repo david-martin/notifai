@@ -1,9 +1,10 @@
 import json
 import os
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 
 import anthropic
+import resend
 from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
@@ -22,28 +23,30 @@ ASSIST_MODEL = os.environ.get("NOTIFAI_ASSIST_MODEL", "claude-haiku-4-5-20251001
 
 anthropic_client = anthropic.Anthropic()
 
-GUARD_SYSTEM_PROMPT = (
-    "You evaluate user-submitted descriptions for an event notification service. "
+# Combined validate+generate: if the description is valid, we include the
+# generated query_text in the same response instead of making a second API call.
+# This saves one round trip for valid descriptions (~90% of cases) while keeping
+# the same two-call maximum for invalid ones (reframe attempt → retry → generate).
+# The attempt counter is incremented once per call to /validate.
+COMBINED_SYSTEM_PROMPT = (
+    "You evaluate and convert user-submitted event descriptions for a notification service. "
     "A valid description is one where a web search could plausibly return a yes/no answer — "
     "something real-world, specific enough to check, and that could become true in the future. "
     "Be permissive: if the intent is clear and a web search could answer it, it is valid. "
     "Do not reject descriptions just because they could be phrased more precisely. "
     "Rules: "
-    "(1) If the intent is clear and the event is checkable via web search, return valid=true. "
-    "(2) If it is phrased as a question, or is genuinely ambiguous about what event to check for "
-    "(not just imprecisely worded), attempt to reframe it as a clear event statement "
-    "(e.g. 'X opens', 'X is released', 'X falls below Y') and return valid=false with the reframed version. "
-    "(3) If it cannot be salvaged — no identifiable real-world event, impossible to check via web search, "
-    "or purely subjective — return valid=false with no reframed field. "
-    "Respond ONLY with valid JSON. Include 'reframed' only when rule (2) applies: "
-    '{"valid": true/false, "feedback": "one sentence", "reframed": "reframed description"}'
-)
-
-GENERATE_SYSTEM_PROMPT = (
-    "You generate notification queries from user descriptions. "
-    "Given a plain-English description of something to track, produce a precise daily monitoring query. "
-    "Respond ONLY with JSON: "
-    '{"query_text": "precise question Claude can answer with a web search"}'
+    "(1) If the intent is clear and the event is checkable via web search: return valid=true and "
+    "generate a precise daily monitoring query as query_text "
+    "(e.g. 'Has Python 4.0 been officially released as of today?'). "
+    "(2) If phrased as a question, or genuinely ambiguous about what event to check for "
+    "(not just imprecisely worded): return valid=false with a reframed description. "
+    "(3) If it cannot be salvaged (no identifiable real-world event, impossible to check via web "
+    "search, or purely subjective): return valid=false with no reframed field. "
+    "Respond ONLY with valid JSON. "
+    "Include 'query_text' only when valid=true, 'reframed' only when rule (2) applies: "
+    '{"valid": true, "feedback": "one sentence", "query_text": "precise daily question"} '
+    'or {"valid": false, "feedback": "one sentence", "reframed": "clearer description"} '
+    'or {"valid": false, "feedback": "one sentence"}'
 )
 
 
@@ -165,41 +168,32 @@ def validate_description(
     if rejection:
         return {"valid": False, "feedback": rejection}
     _check_and_increment_attempts(db, user)
-    result = _call_haiku(GUARD_SYSTEM_PROMPT, body.description)
-    response = {"valid": result.get("valid", False), "feedback": result.get("feedback", "")}
-    if "reframed" in result and result["reframed"]:
+    result = _call_haiku(COMBINED_SYSTEM_PROMPT, body.description)
+    valid = result.get("valid", False)
+    response: dict = {"valid": valid, "feedback": result.get("feedback", "")}
+    if valid:
+        query_text = result.get("query_text", "").strip()
+        if query_text:
+            response["query_text"] = query_text
+    elif result.get("reframed"):
         response["reframed"] = result["reframed"]
     return response
 
 
-@router.post("/generate")
-@limiter.limit("10/hour")
-def generate_query(
-    request: Request,
-    body: DescriptionRequest,
-    user: User = Depends(get_current_user),
-    db: DBSession = Depends(get_db),
-):
-    rejection = _pre_guard(body.description)
-    if rejection:
-        raise HTTPException(status_code=422, detail=rejection)
-    _check_and_increment_attempts(db, user)
-    result = _call_haiku(GENERATE_SYSTEM_PROMPT, body.description)
-    query_text = result.get("query_text", "").strip()
-    if not query_text:
-        raise HTTPException(status_code=500, detail="Generation failed — please try again.")
-    return {"query_text": query_text}
+def _query_dict(q: Query) -> dict:
+    return {
+        "id": q.id,
+        "query_text": q.query_text,
+        "active": q.active,
+        "completed": q.completed,
+        "created_at": q.created_at.isoformat(),
+    }
 
 
 @router.get("")
 def list_queries(user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
     return [
-        {
-            "id": q.id,
-            "query_text": q.query_text,
-            "active": q.active,
-            "created_at": q.created_at.isoformat(),
-        }
+        _query_dict(q)
         for q in db.query(Query)
         .filter(Query.user_id == user.id)
         .order_by(Query.created_at.desc())
@@ -223,12 +217,7 @@ def create_query(
     db.add(q)
     db.commit()
     db.refresh(q)
-    return {
-        "id": q.id,
-        "query_text": q.query_text,
-        "active": q.active,
-        "created_at": q.created_at.isoformat(),
-    }
+    return _query_dict(q)
 
 
 @router.patch("/{query_id}")
@@ -243,12 +232,7 @@ def patch_query(
         q.active = body.active
     db.commit()
     db.refresh(q)
-    return {
-        "id": q.id,
-        "query_text": q.query_text,
-        "active": q.active,
-        "created_at": q.created_at.isoformat(),
-    }
+    return _query_dict(q)
 
 
 @router.delete("/{query_id}", status_code=204)
@@ -299,4 +283,133 @@ def get_history(
             }
             for log in logs
         ],
+    }
+
+
+# System prompt for the runner (same as web/runner.py)
+_RUNNER_SYSTEM_PROMPT = (
+    "You are an event monitor. For each question, make exactly one web search, "
+    "then determine if the described condition is met. "
+    "Respond ONLY with valid JSON in this exact format: "
+    '{"answer": "YES" or "NO", "reason": "one sentence explanation", "sources": ["url1", "url2"]}'
+)
+
+
+def _parse_runner_result(text: str) -> dict:
+    text = text.strip()
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        text = match.group(1)
+    return json.loads(text)
+
+
+@router.post("/{query_id}/run")
+@limiter.limit("3/hour")
+def run_query_now(
+    request: Request,
+    query_id: str,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
+    """Run a single query immediately using the real-time API.
+
+    Always uses the real-time API regardless of NOTIFAI_USE_BATCH.
+    Sends an email on YES — same as the scheduled runner.
+    Does NOT auto-deactivate the query even if the answer is YES.
+    """
+    q = _get_owned_query(db, query_id, user)
+
+    model = os.environ.get("NOTIFAI_MODEL", "claude-sonnet-4-6")
+    cache_ttl = int(os.environ.get("NOTIFAI_CACHE_TTL", "3600"))
+    today = date.today().isoformat()
+
+    # Always real-time — never batched. "Run now" is an on-demand check;
+    # results must be available immediately, not after a batch polling cycle.
+    try:
+        response = anthropic_client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=[
+                {
+                    "type": "text",
+                    "text": _RUNNER_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral", "ttl": cache_ttl},
+                }
+            ],
+            tools=[
+                {"type": "web_search_20260209", "name": "web_search", "max_uses": 1},
+                {"type": "code_execution_20260120", "name": "code_execution"},
+            ],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Today is {today}. Search the web and answer: {q.query_text}\n"
+                        f'Return JSON: {{"answer": "YES"|"NO", "reason": "one sentence", "sources": ["url1", ...]}}'
+                    ),
+                }
+            ],
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="API error. Please try again.")
+
+    text_blocks = [b.text for b in response.content if hasattr(b, "text")]
+    text_block = text_blocks[-1] if text_blocks else None
+    if text_block is None:
+        raise HTTPException(status_code=500, detail="No result from API. Please try again.")
+
+    try:
+        result = _parse_runner_result(text_block)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Malformed API response. Please try again.")
+
+    answer = result.get("answer", "NO")
+    reason = result.get("reason", "")
+    sources = result.get("sources", [])
+    email_sent = False
+
+    if answer == "YES":
+        from_email = os.environ.get("RESEND_FROM_EMAIL", "")
+        api_key = os.environ.get("RESEND_API_KEY", "")
+        if from_email and api_key:
+            notify_to = user.notify_email or user.email
+            source_lines = "\n".join(f"  - {s}" for s in sources)
+            body = (
+                f"Query:   {q.query_text}\n"
+                f"Answer:  YES\n"
+                f"Reason:  {reason}\n"
+                f"\nSources:\n{source_lines}"
+            )
+            try:
+                resend.api_key = api_key
+                resend.Emails.send({
+                    "from": from_email,
+                    "to": [notify_to],
+                    "subject": f"[Notifier] {q.query_text[:80]}",
+                    "text": body,
+                })
+                email_sent = True
+            except Exception:
+                pass  # Non-fatal �� still return the result to the user
+        # No auto-deactivation: manual "run now" checks do not retire the query.
+
+    checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    log = NotificationLog(
+        query_id=q.id,
+        user_id=user.id,
+        answer=answer,
+        reason=reason,
+        sources=json.dumps(sources),
+        email_sent=email_sent,
+        checked_at=checked_at,
+    )
+    db.add(log)
+    db.commit()
+
+    return {
+        "answer": answer,
+        "reason": reason,
+        "sources": sources,
+        "checked_at": checked_at.isoformat(),
+        "email_sent": email_sent,
     }
