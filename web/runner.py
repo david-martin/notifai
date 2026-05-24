@@ -55,6 +55,42 @@ def get_session():
     return SessionLocal()
 
 
+_SEARCH_FAILURE_STRINGS = (
+    "rate limit",
+    "tool execution error",
+    "tool is currently unavailable",
+    "web search is currently unavailable",
+    "unable to retrieve current web results",
+    "search could not be completed",
+    "unable to perform web search",
+)
+
+
+def _has_search_failure(content_blocks) -> bool:
+    """Return True if the response contains a web search tool failure."""
+    for block in content_blocks:
+        if getattr(block, "type", None) != "tool_result":
+            continue
+        if getattr(block, "is_error", False):
+            return True
+        raw = getattr(block, "content", "")
+        if isinstance(raw, str):
+            text = raw
+        elif isinstance(raw, list):
+            parts = []
+            for item in raw:
+                if isinstance(item, dict):
+                    parts.append(item.get("text", ""))
+                else:
+                    parts.append(getattr(item, "text", "") or "")
+            text = " ".join(parts)
+        else:
+            text = str(raw) if raw else ""
+        if any(s in text.lower() for s in _SEARCH_FAILURE_STRINGS):
+            return True
+    return False
+
+
 def _parse_response(text: str) -> dict:
     text = text.strip()
     match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
@@ -198,11 +234,8 @@ def _run_sequential(client, db, queries, today, from_email):
             print(f"[runner] API error for {label}: {e}", file=sys.stderr)
             continue
 
-        # Skip on web search tool execution error — system fault, no credit deduction.
-        if any(
-            getattr(b, "type", None) == "tool_result" and getattr(b, "is_error", False)
-            for b in response.content
-        ):
+        # Skip on web search failure (execution error or rate limit) — no credit deduction.
+        if _has_search_failure(response.content):
             print(f"[runner] Web search error for {label}, skipping (no credit deducted).")
             continue
 
@@ -271,11 +304,8 @@ def _run_batch(client, db, queries, today, from_email):
 
         response = result.result.message
 
-        # Skip on web search tool execution error — system fault, no credit deduction.
-        if any(
-            getattr(b, "type", None) == "tool_result" and getattr(b, "is_error", False)
-            for b in response.content
-        ):
+        # Skip on web search failure (execution error or rate limit) — no credit deduction.
+        if _has_search_failure(response.content):
             print(f"[runner] Web search error for {result.custom_id}, skipping (no credit deducted).")
             continue
 

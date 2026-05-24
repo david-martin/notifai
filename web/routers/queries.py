@@ -276,6 +276,50 @@ def _parse_runner_result(text: str) -> dict:
     return json.loads(text)
 
 
+# Strings that appear in tool_result content when Anthropic's web search fails.
+# Covers both is_error=True (tool execution error) and is_error=False (rate limit,
+# service unavailable) failure modes.
+_SEARCH_FAILURE_STRINGS = (
+    "rate limit",
+    "tool execution error",
+    "tool is currently unavailable",
+    "web search is currently unavailable",
+    "unable to retrieve current web results",
+    "search could not be completed",
+    "unable to perform web search",
+)
+
+
+def _has_search_failure(content_blocks) -> bool:
+    """Return True if the response contains a web search tool failure.
+
+    Checks both the is_error flag (tool execution error) and the text content
+    of tool_result blocks (rate-limiting, service unavailable).
+    """
+    for block in content_blocks:
+        if getattr(block, "type", None) != "tool_result":
+            continue
+        if getattr(block, "is_error", False):
+            return True
+        # Also inspect content text for known failure strings.
+        raw = getattr(block, "content", "")
+        if isinstance(raw, str):
+            text = raw
+        elif isinstance(raw, list):
+            parts = []
+            for item in raw:
+                if isinstance(item, dict):
+                    parts.append(item.get("text", ""))
+                else:
+                    parts.append(getattr(item, "text", "") or "")
+            text = " ".join(parts)
+        else:
+            text = str(raw) if raw else ""
+        if any(s in text.lower() for s in _SEARCH_FAILURE_STRINGS):
+            return True
+    return False
+
+
 @router.post("/{query_id}/run")
 @limiter.limit("3/hour")
 def run_query_now(
@@ -335,12 +379,9 @@ def run_query_now(
     except Exception:
         raise HTTPException(status_code=500, detail="API error. Please try again.")
 
-    # Detect server-side tool execution errors (e.g. web search failure).
+    # Detect web search failures (tool execution error OR rate limit / unavailable).
     # These are system faults — do NOT deduct a credit.
-    if any(
-        getattr(b, "type", None) == "tool_result" and getattr(b, "is_error", False)
-        for b in response.content
-    ):
+    if _has_search_failure(response.content):
         raise HTTPException(
             status_code=503,
             detail="Web search unavailable. Please try again in a moment.",
