@@ -320,7 +320,8 @@ def run_query_now(
     q = _get_owned_query(db, query_id, user)
 
     model = os.environ.get("NOTIFAI_MODEL", "claude-sonnet-4-6")
-    cache_ttl = int(os.environ.get("NOTIFAI_CACHE_TTL", "3600"))
+    _ttl_secs = int(os.environ.get("NOTIFAI_CACHE_TTL", "3600"))
+    cache_ttl = "1h" if _ttl_secs >= 3600 else "5m"
     today = date.today().isoformat()
 
     # Always real-time — never batched. "Run now" is an on-demand check;

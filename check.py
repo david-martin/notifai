@@ -25,9 +25,11 @@ SYSTEM_PROMPT = (
 
 MODEL = os.environ.get("NOTIFAI_MODEL", "claude-sonnet-4-6")
 
-# Extended cache TTL reduces prompt write costs when many queries run close together.
-# Default 1 hour — adjust lower if cache write cost is a concern.
-CACHE_TTL = int(os.environ.get("NOTIFAI_CACHE_TTL", "3600"))
+# Cache TTL for the system prompt. API accepts "1h" or "5m".
+# Env var is integer seconds for readability; converted to string on use.
+# 1 hour reduces prompt write costs when many queries run close together.
+_cache_ttl_secs = int(os.environ.get("NOTIFAI_CACHE_TTL", "3600"))
+CACHE_TTL = "1h" if _cache_ttl_secs >= 3600 else "5m"
 
 QUERIES_PATH = os.environ.get("NOTIFAI_QUERIES_PATH", "queries.yaml")
 
