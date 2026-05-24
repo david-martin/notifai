@@ -379,7 +379,6 @@ def run_query_now(
             ],
             tools=[
                 {"type": "web_search_20260209", "name": "web_search", "max_uses": 1},
-                {"type": "code_execution_20260120", "name": "code_execution"},
             ],
             messages=[
                 {
