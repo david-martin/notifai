@@ -12,8 +12,11 @@ QUERIES_PATH = "queries.yaml"
 SYSTEM_PROMPT = (
     "You are a query assistant. Given a plain-English description of something to track, "
     "generate a well-formed monitoring query. "
+    "The query must be a present-tense event statement that completes the sentence 'Notify me when…' — "
+    "for example: 'Python 4.0 is officially released', 'the artemis mission lands on the moon'. "
+    "Use lowercase for the first word. No question marks. "
     "Respond ONLY with valid JSON in this exact format: "
-    '{"id": "kebab-case-slug", "description": "short label", "query": "precise question to ask daily"}'
+    '{"id": "kebab-case-slug", "description": "short label", "query": "event statement"}'
 )
 
 
@@ -51,7 +54,8 @@ def prompt_edit(entry: dict) -> dict:
 def run():
     client = anthropic.Anthropic()
 
-    print("What do you want to track? Describe it in plain English:")
+    print("Notify me when…")
+    print("(describe the event in plain English — the AI will reword it for you)")
     description = input("> ").strip()
     if not description:
         print("Nothing entered. Exiting.")
@@ -79,7 +83,7 @@ def run():
         print("\nProposed query:")
         print(f"  id:          {entry['id']}")
         print(f"  description: {entry['description']}")
-        print(f"  query:       {entry['query']}")
+        print(f"  Notify me when… {entry['query']}")
 
         action = input("\n[y] confirm  [e] edit  [n] discard: ").strip().lower()
 
