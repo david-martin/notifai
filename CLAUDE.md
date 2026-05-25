@@ -18,6 +18,7 @@ The core project is self-hosted and open-source. A hosted version also exists �
 | Silent on NO | Only notify when a condition is met. No noise. |
 | Vanilla where possible | No framework bloat. Browser standards, plain Python, readable code. |
 | Single source for Claude API logic | All message construction, response parsing, and search failure detection lives in `core.py`. Scripts and web handlers are thin callers that handle their own data access and result persistence. No Claude API logic outside `core.py`. |
+| "Notify me when…" is the language | Every query is stored and displayed as a present-tense event statement that completes the sentence "Notify me when…". The UI, emails, CLI, and runner all frame queries in this form. The stored `query_text` never contains a question mark. |
 
 ---
 
@@ -95,6 +96,27 @@ Hard limit: max 1 LLM call per query creation (combined validate + generate in o
 | Backend language | Python |
 | Notifications | Email only (for now) |
 | Query storage | `query_text` only — no slug or label generated |
+
+---
+
+## Query surfaces — where `query_text` appears
+
+`query_text` is a present-tense event statement, e.g. `"the artemis mission lands on the moon"`.
+It is stored without any prefix. Every surface that displays it adds "Notify me when…" at render time.
+
+| Surface | Rendered form |
+|---|---|
+| `dashboard.html` query cards | `Notify me when… {query_text}` |
+| `dashboard.html` step 2 create preview | `Notify me when… {query_text}` |
+| `history.html` query selector dropdown | `Notify me when… {query_text}` |
+| `index.html` examples section | label "Notify me when…" above each example |
+| Email subject (YES) | `[notifai] it happened — {query_text}` |
+| Email body (YES) | `You asked to be notified when:\n{query_text}\n\nIt happened!\n{reason}\n\nSources:…` |
+| Email body (NO, notify_on_no) | `You asked to be notified when:\n{query_text}\n\nNot yet.\n{reason}\n\nSources:…` |
+| `assist.py` CLI display | `Notify me when… {query_text}` |
+| Runner message to Claude | `…determine whether this event has occurred:\n"{query_text}"` |
+| `queries.yaml` `query:` field | plain statement, no prefix |
+| DB `query_text` column | plain statement, no prefix |
 
 ---
 
