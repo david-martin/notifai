@@ -185,6 +185,15 @@
       margin-bottom: 0.25rem;
     }
 
+    .notify-prefix-card {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 0.1rem;
+    }
+
     .query-text {
       color: var(--muted);
       font-size: 0.8rem;
@@ -410,6 +419,7 @@
         <p class="step-label">We'll monitor this daily</p>
         <div class="generated-preview" id="generatedPreview" style="display:block">
           <div class="field">
+            <div class="field-label">Notify me when…</div>
             <div class="field-value" id="previewQuery"></div>
           </div>
         </div>
@@ -500,6 +510,7 @@
             onclick="toggleQuery('${q.id}', ${!q.active})"
           ></button>
           <div class="query-body">
+            <div class="notify-prefix-card">Notify me when…</div>
             <div class="query-text">${escHtml(q.query_text)}</div>
             <div class="query-meta">
               <span class="status-badge ${q.active ? "active" : q.completed ? "completed" : "paused"}">${q.active ? "Active" : q.completed ? "Completed" : "Paused"}</span>
