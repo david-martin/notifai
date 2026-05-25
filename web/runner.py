@@ -98,20 +98,25 @@ def _handle_result(db, q, user, result_dict, from_email):
         notify_to = user.notify_email or user.email
         source_lines = "\n".join(f"  - {s}" for s in sources)
         app_base_url = os.environ.get("APP_BASE_URL", "")
+        dashboard_link = f"{app_base_url}/dashboard.html" if app_base_url else "your dashboard"
         body = (
-            f"Query:   {q.query_text}\n"
-            f"Answer:  YES\n"
-            f"Reason:  {reason}\n"
-            f"\nSources:\n{source_lines}\n"
-            f"\n✓ This query has been completed and is no longer being checked daily.\n"
-            f"If you think this is a mistake, you can re-enable it from your dashboard"
-            + (f":\n{app_base_url}/dashboard.html" if app_base_url else ".")
+            f"You asked to be notified when:\n"
+            f"{q.query_text}\n"
+            f"\n"
+            f"It happened!\n"
+            f"{reason}\n"
+            f"\n"
+            f"Sources:\n"
+            f"{source_lines}\n"
+            f"\n"
+            f"✓ This query is now complete and will no longer run daily.\n"
+            f"  Re-enable it from {dashboard_link}."
         )
         try:
             resend.Emails.send({
                 "from": from_email,
                 "to": [notify_to],
-                "subject": f"[Notifier] {q.query_text[:80]}",
+                "subject": f"[notifai] it happened — {q.query_text[:80]}",
                 "text": body,
             })
             email_sent = True
