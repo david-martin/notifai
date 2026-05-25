@@ -215,7 +215,7 @@
       queries.forEach(q => {
         const opt = document.createElement("option");
         opt.value = q.id;
-        opt.textContent = q.query_text;
+        opt.textContent = "Notify me when… " + q.query_text;
         sel.appendChild(opt);
       });
 
