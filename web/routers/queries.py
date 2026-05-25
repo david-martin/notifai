@@ -43,15 +43,17 @@ COMBINED_SYSTEM_PROMPT = (
     "Do not reject descriptions just because they could be phrased more precisely. "
     "Rules: "
     "(1) If the intent is clear and the event is checkable via web search: return valid=true and "
-    "generate a precise daily monitoring query as query_text "
-    "(e.g. 'Has Python 4.0 been officially released as of today?'). "
+    "generate query_text as a present-tense event statement that completes the sentence "
+    "'Notify me when…' — e.g. 'Python 4.0 is officially released', "
+    "'the artemis mission lands on the moon'. "
+    "Use lowercase for the first word. No question marks. "
     "(2) If phrased as a question, or genuinely ambiguous about what event to check for "
     "(not just imprecisely worded): return valid=false with a reframed description. "
     "(3) If it cannot be salvaged (no identifiable real-world event, impossible to check via web "
     "search, or purely subjective): return valid=false with no reframed field. "
     "Respond ONLY with valid JSON. "
     "Include 'query_text' only when valid=true, 'reframed' only when rule (2) applies: "
-    '{"valid": true, "feedback": "one sentence", "query_text": "precise daily question"} '
+    '{"valid": true, "feedback": "one sentence", "query_text": "event statement"} '
     'or {"valid": false, "feedback": "one sentence", "reframed": "clearer description"} '
     'or {"valid": false, "feedback": "one sentence"}'
 )
@@ -363,17 +365,21 @@ def run_query_now(
             notify_to = user.notify_email or user.email
             source_lines = "\n".join(f"  - {s}" for s in sources)
             body = (
-                f"Query:   {q.query_text}\n"
-                f"Answer:  YES\n"
-                f"Reason:  {reason}\n"
-                f"\nSources:\n{source_lines}"
+                f"You asked to be notified when:\n"
+                f"{q.query_text}\n"
+                f"\n"
+                f"It happened!\n"
+                f"{reason}\n"
+                f"\n"
+                f"Sources:\n"
+                f"{source_lines}"
             )
             try:
                 resend.api_key = api_key
                 resend.Emails.send({
                     "from": from_email,
                     "to": [notify_to],
-                    "subject": f"[Notifier] {q.query_text[:80]}",
+                    "subject": f"[notifai] it happened — {q.query_text[:80]}",
                     "text": body,
                 })
                 email_sent = True
