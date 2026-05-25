@@ -45,10 +45,13 @@ def load_queries(path: str) -> list:
 
 def format_email_body(query: str, answer: str, reason: str, sources: list) -> str:
     source_lines = "\n".join(f"  - {s}" for s in sources)
+    label = "It happened!" if answer == "YES" else "Not yet."
     return (
-        f"Query:   {query}\n"
-        f"Answer:  {answer}\n"
-        f"Reason:  {reason}\n"
+        f"You asked to be notified when:\n"
+        f"{query}\n"
+        f"\n"
+        f"{label}\n"
+        f"{reason}\n"
         f"\n"
         f"Sources:\n"
         f"{source_lines}"
@@ -99,7 +102,7 @@ def _run_sequential(client, queries, today, notify_email, from_email):
                 {
                     "from": from_email,
                     "to": [notify_email],
-                    "subject": f"[Notifier] {q['description']}",
+                    "subject": f"[notifai] it happened — {q['query'][:80]}",
                     "text": body,
                 }
             )
@@ -163,7 +166,7 @@ def _run_batch(client, queries, today, notify_email, from_email):
             resend.Emails.send({
                 "from": from_email,
                 "to": [notify_email],
-                "subject": f"[Notifier] {q['description']}",
+                "subject": f"[notifai] it happened — {q['query'][:80]}",
                 "text": body,
             })
             print(f"  [{q['id']}] {answer} — email sent.")

@@ -31,8 +31,8 @@ CACHE_TTL = "1h" if _cache_ttl_secs >= 3600 else "5m"
 # Canonical runner system prompt. Used by check.py, web/runner.py, and
 # web/routers/queries.py (run_query_now). Do not duplicate this string elsewhere.
 RUNNER_SYSTEM_PROMPT = (
-    "You are an event monitor. For each question, make exactly one web search, "
-    "then determine if the described condition is met. "
+    "You are an event monitor. For each event, make exactly one web search, "
+    "then determine if the event has occurred. "
     "Respond ONLY with valid JSON in this exact format: "
     '{"answer": "YES" or "NO", "reason": "one sentence explanation", "sources": ["url1", "url2"]}'
 )
@@ -64,7 +64,8 @@ def make_message_params(query_text: str, today: str) -> dict:
             {
                 "role": "user",
                 "content": (
-                    f"Today is {today}. Search the web and answer: {query_text}\n"
+                    f"Today is {today}. Search the web and determine whether this event has occurred:\n"
+                    f'"{query_text}"\n'
                     f'Return JSON: {{"answer": "YES"|"NO", "reason": "one sentence", "sources": ["url1", ...]}}'
                 ),
             }
