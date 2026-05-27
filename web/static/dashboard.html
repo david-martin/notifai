@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>notifai — dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2a2d3a;
+      --text: #e8eaf0;
+      --muted: #7b7f94;
+      --accent: #6c8ef7;
+      --accent-hover: #8aa3ff;
+      --green: #4ade80;
+      --red: #f87171;
+      --yellow: #fbbf24;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .logo span { color: var(--accent); }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      font-size: 0.875rem;
+    }
+
+    .email-display { color: var(--muted); }
+
+    .btn-link {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.875rem;
+      padding: 0;
+      text-decoration: underline;
+    }
+    .btn-link:hover { color: var(--text); }
+
+    main {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+
+    h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.4; cursor: default; }
+
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-secondary:hover { background: var(--border); }
+    .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; border-radius: 6px; }
+
+    .run-now-result {
+      margin-top: 0.5rem;
+      padding: 0.6rem 0.75rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+    .run-now-result .rn-answer { font-weight: 700; margin-bottom: 0.2rem; }
+    .run-now-result .rn-answer.yes { color: #34c759; }
+    .run-now-result .rn-answer.no { color: var(--muted); }
+    .run-now-result .rn-reason { color: var(--text); margin-bottom: 0.25rem; }
+    .run-now-result .rn-history { font-size: 0.75rem; color: var(--muted); }
+
+    .btn-danger {
+      background: none;
+      border: none;
+      color: var(--red);
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 0;
+      opacity: 0.7;
+    }
+    .btn-danger:hover { opacity: 1; }
+
+    /* Query list */
+    .query-list { display: flex; flex-direction: column; gap: 0.75rem; }
+
+    .query-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .query-card.inactive { opacity: 0.55; }
+
+    .query-toggle {
+      margin-top: 2px;
+      flex-shrink: 0;
+      width: 36px;
+      height: 20px;
+      background: var(--border);
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.15s;
+    }
+    .query-toggle.on { background: var(--accent); }
+    .query-toggle::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      background: #fff;
+      border-radius: 50%;
+      transition: left 0.15s;
+    }
+    .query-toggle.on::after { left: 18px; }
+
+    .query-body { flex: 1; min-width: 0; }
+
+    .query-description {
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .notify-prefix-card {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 0.1rem;
+    }
+
+    .query-text {
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.5;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .query-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+
+    .status-badge {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .status-badge.active { background: rgba(108,142,247,0.15); color: var(--accent); }
+    .status-badge.paused { background: rgba(123,127,148,0.15); color: var(--muted); }
+    .status-badge.completed { background: rgba(52,199,89,0.15); color: #34c759; }
+
+    /* Create flow */
+    .create-panel {
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    .create-panel h3 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+
+    textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      color: var(--text);
+      font-size: 0.875rem;
+      font-family: inherit;
+      line-height: 1.5;
+      resize: vertical;
+      min-height: 72px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    textarea:focus { border-color: var(--accent); }
+    textarea::placeholder { color: var(--muted); }
+
+    .feedback-box {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      display: none;
+    }
+    .feedback-box.invalid { background: rgba(248,113,113,0.1); color: var(--red); }
+    .feedback-box.valid { background: rgba(74,222,128,0.1); color: var(--green); }
+
+    .generated-preview {
+      display: none;
+      margin-top: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+    }
+
+    .generated-preview .field { margin-bottom: 0.5rem; }
+    .generated-preview .field:last-child { margin-bottom: 0; }
+    .generated-preview .field-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.2rem;
+    }
+    .generated-preview .field-value { font-size: 0.875rem; }
+
+    .create-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .step-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.75rem;
+      margin-bottom: 0.4rem;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .empty-state p { margin-top: 0.5rem; font-size: 0.8rem; }
+
+    .limit-notice {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-align: right;
+      margin-top: 0.5rem;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      color: var(--red);
+      font-size: 0.8rem;
+      margin-top: 0.5rem;
+      display: none;
+    }
+
+    .notify-prefix {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.4rem;
+    }
+
+    .example-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.6rem;
+    }
+
+    .example-chip {
+      font-size: 0.75rem;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.25rem 0.6rem;
+      cursor: pointer;
+      line-height: 1.4;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .example-chip:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    /* Schedule selector row on query cards */
+    .query-schedule {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-top: 0.4rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .schedule-select {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-family: inherit;
+      cursor: pointer;
+      padding: 0;
+      outline: none;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    .schedule-select:hover { color: var(--text); }
+    .schedule-select option { background: var(--surface2); color: var(--text); }
+
+    /* Schedule selector in the create flow (step 2) */
+    .create-interval-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .create-interval-select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.8rem;
+      font-family: inherit;
+      padding: 0.25rem 0.5rem;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .create-interval-select:focus { border-color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">notif<span>ai</span></div>
+    <div class="header-actions">
+      <span class="email-display" id="userEmail"></span>
+      <a href="/history.html" style="color:var(--muted);font-size:0.875rem;text-decoration:none;">History</a>
+      <a href="/account.html" style="color:var(--muted);font-size:0.875rem;text-decoration:none;" title="Buy more credits">
+        <span id="creditBadge" style="color:var(--muted);font-size:0.875rem;"></span>
+        Account
+      </a>
+      <button class="btn-link" id="logoutBtn">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="section-header">
+      <h2>Your queries</h2>
+      <button class="btn-primary" id="newQueryBtn">+ New query</button>
+    </div>
+
+    <!-- Create flow panel (hidden by default) -->
+    <div class="create-panel" id="createPanel" style="display:none">
+      <h3>New query</h3>
+
+      <!-- Step 1: describe -->
+      <div id="step1">
+        <p class="notify-prefix">Notify me when…</p>
+        <textarea id="descInput" rows="3"></textarea>
+        <div class="example-chips" id="exampleChips"></div>
+        <div class="feedback-box" id="feedbackBox"></div>
+        <div id="reframeBox" style="display:none;margin-top:0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem">
+          <p style="font-size:0.75rem;color:var(--muted);margin-bottom:0.4rem">Did you mean?</p>
+          <p id="reframeText" style="font-size:0.9rem;margin-bottom:0.6rem"></p>
+          <div style="display:flex;gap:0.5rem">
+            <button class="btn-primary" id="useReframeBtn">Yes, use this</button>
+            <button class="btn-secondary" id="editInsteadBtn">No, let me edit</button>
+          </div>
+        </div>
+        <div class="create-actions">
+          <button class="btn-primary" id="validateBtn">Check &amp; continue</button>
+          <button class="btn-secondary" id="cancelBtn1">Cancel</button>
+        </div>
+        <div class="error-msg" id="validateError"></div>
+      </div>
+
+      <!-- Step 2: preview generated query -->
+      <div id="step2" style="display:none">
+        <div class="create-interval-row">
+          <span>Check</span>
+          <select class="create-interval-select" id="intervalSelect">
+            <option value="1d" selected>daily</option>
+            <option value="1w">weekly</option>
+            <option value="1mo">monthly</option>
+          </select>
+        </div>
+        <div class="generated-preview" id="generatedPreview" style="display:block">
+          <div class="field">
+            <div class="field-label">Notify me when…</div>
+            <div class="field-value" id="previewQuery"></div>
+          </div>
+        </div>
+        <div class="create-actions">
+          <button class="btn-primary" id="confirmBtn">Add query</button>
+          <button class="btn-secondary" id="backBtn">Back</button>
+          <button class="btn-secondary" id="cancelBtn2">Cancel</button>
+        </div>
+        <div class="error-msg" id="confirmError"></div>
+      </div>
+    </div>
+
+    <!-- Query list -->
+    <div id="queryList" class="query-list"></div>
+    <p class="limit-notice" id="limitNotice"></p>
+  </main>
+
+  <script src="/examples.js"></script>
+  <script src="/dashboard.js"></script>
+</body>
+</html>

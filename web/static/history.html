@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>notifai — history</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e8eaf0;
+      --muted: #7b7f94;
+      --accent: #6c8ef7;
+      --accent-hover: #8aa3ff;
+      --green: #4ade80;
+      --red: #f87171;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.02em; }
+    .logo span { color: var(--accent); }
+
+    nav { display: flex; gap: 1.5rem; align-items: center; font-size: 0.875rem; }
+    nav a { color: var(--muted); text-decoration: none; }
+    nav a:hover { color: var(--text); }
+    nav a.active { color: var(--text); }
+
+    .btn-link {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 0.875rem; padding: 0; text-decoration: underline;
+    }
+    .btn-link:hover { color: var(--text); }
+
+    main {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+
+    h1 { font-size: 1.1rem; }
+
+    .query-selector {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+      color: var(--text);
+      font-size: 0.875rem;
+      outline: none;
+      cursor: pointer;
+    }
+    .query-selector:focus { border-color: var(--accent); }
+
+    .log-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+    .log-entry {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.875rem 1rem;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.75rem;
+      align-items: start;
+    }
+
+    .answer-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    .answer-badge.yes { background: rgba(74,222,128,0.15); color: var(--green); }
+    .answer-badge.no { background: rgba(123,127,148,0.12); color: var(--muted); }
+
+    .log-body {}
+
+    .log-reason { font-size: 0.875rem; line-height: 1.45; }
+
+    .log-sources {
+      margin-top: 0.35rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .log-sources a {
+      font-size: 0.75rem;
+      color: var(--accent);
+      text-decoration: none;
+      background: rgba(108,142,247,0.08);
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: inline-block;
+    }
+    .log-sources a:hover { text-decoration: underline; }
+
+    .log-date {
+      font-size: 0.75rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .pagination {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+      margin-top: 1.25rem;
+    }
+
+    .btn-page {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.4rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .btn-page:hover { border-color: var(--accent); }
+    .btn-page:disabled { opacity: 0.4; cursor: default; }
+    .btn-page.current { border-color: var(--accent); color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">notif<span>ai</span></div>
+    <nav>
+      <a href="/dashboard.html">Queries</a>
+      <a href="/history.html" class="active">History</a>
+      <a href="/account.html">Account</a>
+      <button class="btn-link" id="logoutBtn">Sign out</button>
+    </nav>
+  </header>
+
+  <main>
+    <div class="page-header">
+      <h1>History</h1>
+      <select class="query-selector" id="querySelect">
+        <option value="">Select a query…</option>
+      </select>
+    </div>
+
+    <div id="logList" class="log-list"></div>
+    <div class="pagination" id="pagination"></div>
+  </main>
+
+  <script src="/history.js"></script>
+</body>
+</html>
