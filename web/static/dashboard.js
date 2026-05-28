@@ -42,12 +42,19 @@ function renderExampleChips() {
 }
 
 async function api(path, options = {}) {
-  const r = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (r.status === 401) { window.location.replace("/"); return null; }
-  return r;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const r = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      ...options,
+    });
+    if (r.status === 401) { window.location.replace("/"); return null; }
+    return r;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function init() {
