@@ -2,7 +2,7 @@
 
 ## What this is
 
-An AI-powered event notification system. Define natural-language queries — "has Python 4.0 been released?", "has a crewed mission landed on Mars?" — and receive an email when the answer is YES. Runs on a schedule without any manual intervention.
+An AI-powered event notification system. Define natural-language queries — "has Half-Life 3 been announced?", "has the PS5 had a price drop?" — and receive an email when the answer is YES. Runs on a schedule without any manual intervention.
 
 The core project is self-hosted and open-source. A hosted version also exists — deployment and ops details for that live in a separate private repo.
 
@@ -101,7 +101,7 @@ Hard limit: max 1 LLM call per query creation (combined validate + generate in o
 
 ## Query surfaces — where `query_text` appears
 
-`query_text` is a present-tense event statement, e.g. `"the artemis mission lands on the moon"`.
+`query_text` is a present-tense event statement, e.g. `"Half-Life 3 is officially announced by Valve"`.
 It is stored without any prefix. Every surface that displays it adds "Notify me when…" at render time.
 
 | Surface | Rendered form |

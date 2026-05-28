@@ -2,7 +2,7 @@
 
 Get an email when something you care about happens.
 
-Define a query in plain English — *"have Stray Kids announced European tour dates for this year?"*, *"is the home heating oil price back to pre-war levels?"* — and notifai checks daily and emails you when the answer is YES.
+Define a query in plain English — *"has Half-Life 3 been announced?"*, *"has the PS5 had a price drop?"* — and notifai checks daily and emails you when the answer is YES.
 
 **Disclaimer! - This project makes use of genAI.**
 
@@ -55,7 +55,7 @@ notifai uses Claude with live web search to evaluate a natural-language conditio
 
 **The sweet spot: conditions that require judgment**
 
-notifai works best when the answer lives in unstructured text — news articles, press releases, announcements, social posts — and requires reading and interpreting rather than just fetching a number. There's no API for "have Stray Kids announced European tour dates?". The answer is scattered across fan sites, ticketing platforms, and social posts. Claude can find and synthesise it; a script can't.
+notifai works best when the answer lives in unstructured text — news articles, press releases, announcements, social posts — and requires reading and interpreting rather than just fetching a number. There's no API for "has Half-Life 3 been announced?". The answer is scattered across gaming news sites, Valve press releases, and social posts. Claude can find and synthesise it; a script can't.
 
 Good fits:
 

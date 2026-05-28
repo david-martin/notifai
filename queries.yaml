@@ -1,12 +1,12 @@
 queries:
-  - id: python-4-release
-    description: Python 4.0 release
-    query: Python 4.0 is officially released
+  - id: half-life-3
+    description: Half-Life 3 announcement
+    query: Half-Life 3 is officially announced by Valve
     active: true
     # interval: 1d   ← daily is the default; omit to keep daily
 
-  - id: mars-crewed-landing
-    description: First crewed Mars landing
-    query: the first crewed mission to Mars successfully lands on the Martian surface
+  - id: ps5-price-drop
+    description: PS5 price drop
+    query: the PS5 gets an official price drop
     active: true
     interval: 1w    # check weekly; options: 1d (default), 1w, 1mo
