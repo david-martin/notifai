@@ -1,0 +1,42 @@
+#!/bin/sh
+# Pre-commit hook: block paths that belong in notifai-hosted (private repo),
+# not in notifai (public repo).
+
+BLOCKED_PATTERNS="
+^deploy/
+^tasks/
+^docs/superpowers/
+^docs/security
+plan\.md
+plan2\.md
+\.service$
+Caddyfile
+prometheus\.yml
+prometheus\.service
+"
+
+failed=0
+
+# Get list of staged files (added, modified, renamed)
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+
+for pattern in $BLOCKED_PATTERNS; do
+    # strip leading/trailing whitespace from pattern
+    pattern=$(echo "$pattern" | tr -d '[:space:]')
+    [ -z "$pattern" ] && continue
+
+    match=$(echo "$staged" | grep -E "$pattern" || true)
+    if [ -n "$match" ]; then
+        echo "❌ BLOCKED: '$match' matches private-repo pattern '$pattern'"
+        echo "   This file belongs in notifai-hosted/, not notifai/."
+        failed=1
+    fi
+done
+
+if [ "$failed" -eq 1 ]; then
+    echo ""
+    echo "Commit rejected. Move the flagged file(s) to notifai-hosted/ instead."
+    exit 1
+fi
+
+exit 0
