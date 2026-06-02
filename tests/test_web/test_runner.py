@@ -305,8 +305,12 @@ def test_runner_runs_query_past_due(runner_db):
 
 
 def test_runner_advances_next_check_at_after_success(user_with_query, runner_db):
-    """After a successful check, next_check_at is set to now + interval."""
-    from datetime import datetime, timedelta, timezone
+    """After a successful check, next_check_at is set to midnight today + interval.
+
+    advance_interval anchors to midnight to prevent the runner firing before
+    next_check_at when the batch completes a few minutes after the timer fires.
+    """
+    from datetime import datetime, date, timedelta, timezone
     _, query = user_with_query
     query_id = query.id
     query.check_interval = "1w"
@@ -314,7 +318,6 @@ def test_runner_advances_next_check_at_after_success(user_with_query, runner_db)
     runner_db.commit()
 
     mock_resp = _mock_claude_response("NO", "Not yet.", [])
-    t_before = datetime.now(timezone.utc).replace(tzinfo=None)
 
     with patch("web.runner.anthropic.Anthropic") as MockClient, \
          patch("web.runner.resend.Emails.send"), \
@@ -323,12 +326,11 @@ def test_runner_advances_next_check_at_after_success(user_with_query, runner_db)
         from web.runner import run_checks
         run_checks()
 
-    t_after = datetime.now(timezone.utc).replace(tzinfo=None)
     refreshed = runner_db.query(Query).filter(Query.id == query_id).first()
     assert refreshed.next_check_at is not None
-    expected_min = t_before + timedelta(weeks=1)
-    expected_max = t_after + timedelta(weeks=1)
-    assert expected_min <= refreshed.next_check_at <= expected_max
+    # advance_interval anchors to midnight of today, then adds the interval.
+    expected = datetime.combine(date.today(), datetime.min.time()) + timedelta(weeks=1)
+    assert refreshed.next_check_at == expected
 
 
 def test_runner_does_not_advance_next_check_at_on_error(runner_db):

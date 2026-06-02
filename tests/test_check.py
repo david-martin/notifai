@@ -299,22 +299,34 @@ class TestAdvanceInterval:
         from datetime import datetime
         dt = datetime(2026, 5, 26, 7, 0, 0)
         result = advance_interval(dt, "1d")
-        assert result == datetime(2026, 5, 27, 7, 0, 0)
+        assert result == datetime(2026, 5, 27, 0, 0, 0)
 
     def test_weekly_advances_seven_days(self):
         from datetime import datetime
         dt = datetime(2026, 5, 26, 7, 0, 0)
         result = advance_interval(dt, "1w")
-        assert result == datetime(2026, 6, 2, 7, 0, 0)
+        assert result == datetime(2026, 6, 2, 0, 0, 0)
 
     def test_monthly_advances_one_calendar_month(self):
         from datetime import datetime
         dt = datetime(2026, 5, 26, 7, 0, 0)
         result = advance_interval(dt, "1mo")
-        assert result == datetime(2026, 6, 26, 7, 0, 0)
+        assert result == datetime(2026, 6, 26, 0, 0, 0)
 
     def test_unknown_interval_falls_back_to_daily(self):
         from datetime import datetime
         dt = datetime(2026, 5, 26, 7, 0, 0)
         result = advance_interval(dt, "2d")
-        assert result == datetime(2026, 5, 27, 7, 0, 0)
+        assert result == datetime(2026, 5, 27, 0, 0, 0)
+
+    def test_daily_anchors_to_midnight_not_current_time(self):
+        """Prove-It: batch finishes at 07:05 → next_check_at must be midnight next day.
+
+        Bug: advance_interval(07:05:09, "1d") returned 07:05:09 next day.
+        Runner fires at 07:00 UTC, so 07:00 < 07:05 → queries skipped every other day.
+        Fix: anchor to midnight so next_check_at is always well before the 07:00 runner.
+        """
+        from datetime import datetime
+        dt = datetime(2026, 5, 31, 7, 5, 9)  # batch finished at 07:05:09 (as in prod logs)
+        result = advance_interval(dt, "1d")
+        assert result == datetime(2026, 6, 1, 0, 0, 0)  # midnight next day, not 07:05:09

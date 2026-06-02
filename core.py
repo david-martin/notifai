@@ -217,9 +217,21 @@ def has_search_failure(content_blocks) -> str | None:
 
 
 def advance_interval(dt: datetime, interval: str) -> datetime:
-    """Return dt advanced by interval. Falls back to 1 day for unknown intervals."""
+    """Return dt advanced by interval, anchored to midnight of the input date.
+
+    Anchoring to midnight prevents a runner timing bug: if the batch finishes
+    at e.g. 07:05 and the timer fires daily at 07:00, advancing from 'now'
+    sets next_check_at to 07:05 the next day — which the 07:00 runner misses,
+    causing every other run to be silently skipped.
+
+    By advancing from midnight instead, next_check_at is always 00:00 of the
+    next period, well before the scheduled runner time.
+
+    Falls back to 1 day for unknown intervals.
+    """
+    midnight = dt.replace(hour=0, minute=0, second=0, microsecond=0)
     delta = INTERVAL_DELTAS.get(interval, timedelta(days=1))
-    return dt + delta
+    return midnight + delta
 
 
 def format_email_body(query: str, answer: str, reason: str, sources: list[str]) -> str:
