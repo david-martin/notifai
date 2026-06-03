@@ -38,7 +38,7 @@ def test_all_tables_created(db_engine):
 def test_users_table_columns(db_engine):
     inspector = inspect(db_engine)
     columns = {c["name"] for c in inspector.get_columns("users")}
-    assert {"id", "email", "notify_email", "tier", "query_credits", "created_at"}.issubset(columns)
+    assert {"id", "email", "notify_email", "tier", "query_credits", "created_at", "low_balance_notified"}.issubset(columns)
     # Dead columns dropped in migration e1f2a3b4c5d6
     assert "creation_attempts_this_month" not in columns
     assert "creation_attempts_reset_at" not in columns
