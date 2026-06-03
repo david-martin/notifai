@@ -28,7 +28,7 @@ def _hash_token(token: str) -> str:
 def get_or_create_user(db: DBSession, email: str) -> User:
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        user = User(email=email, notify_email=email)
+        user = User(email=email, notify_email=email, query_credits=20)
         db.add(user)
         db.commit()
         db.refresh(user)

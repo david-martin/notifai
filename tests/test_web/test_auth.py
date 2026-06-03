@@ -115,3 +115,28 @@ def test_magic_link_rate_limit(client, db):
     finally:
         _limiter.enabled = False
         _limiter.reset()
+
+
+def test_new_user_gets_20_credits(client, db):
+    """First sign-in for a new email must grant 20 query credits."""
+    from web.models import User
+    with patch("web.routers.auth.send_magic_link_email"):
+        client.post("/auth/request", json={"email": "newuser@example.com"})
+    user = db.query(User).filter(User.email == "newuser@example.com").first()
+    assert user is not None
+    assert user.query_credits == 20
+
+
+def test_existing_user_credits_unchanged_on_re_request(client, db):
+    """Requesting a magic link again must not reset credits."""
+    from web.models import User
+    with patch("web.routers.auth.send_magic_link_email"):
+        client.post("/auth/request", json={"email": "existing@example.com"})
+    user = db.query(User).filter(User.email == "existing@example.com").first()
+    user.query_credits = 5
+    db.commit()
+
+    with patch("web.routers.auth.send_magic_link_email"):
+        client.post("/auth/request", json={"email": "existing@example.com"})
+    db.refresh(user)
+    assert user.query_credits == 5
