@@ -50,3 +50,12 @@ def test_queries_table_columns(db_engine):
     assert {"id", "user_id", "query_text",
             "active", "created_at"}.issubset(columns)
     assert "notify_on_no" not in columns
+
+
+def test_user_has_low_balance_notified_column(db):
+    from web.models import User
+    user = User(email="t@example.com", query_credits=5, tier="free")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    assert user.low_balance_notified is False

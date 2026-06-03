@@ -19,10 +19,13 @@ class User(Base):
     id = Column(String(36), primary_key=True, default=_uuid)
     email = Column(String, unique=True, nullable=False, index=True)
     notify_email = Column(String, nullable=True)
-    tier = Column(String, nullable=False, default="free")  # legacy, kept for migration
+    tier = Column(String, nullable=False, default="free")
+    # "free"  = never purchased; "paid" = has purchased at least once (permanent).
     # Query credits: each scheduled or on-demand check costs 1 credit.
-    # Purchased in one-time Stripe blocks (80 / 160 / 320). New accounts start at 0.
+    # New accounts start at 20 (set explicitly in get_or_create_user).
     query_credits = Column(Integer, nullable=False, default=0)
+    low_balance_notified = Column(Boolean, nullable=False, default=False)
+    # Set True when a low-balance email is sent. Reset to False on purchase.
     stripe_customer_id = Column(String, nullable=True)
     stripe_subscription_id = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=_now)
