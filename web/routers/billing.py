@@ -21,18 +21,18 @@ SUCCESS_URL = _app_base_url + "/account.html?purchased=1"
 CANCEL_URL = _app_base_url + "/account.html"
 
 # One-time purchase packages: credits → Stripe price ID env var.
-# STRIPE_PRICE_ID_80:  €4  → 80 credits
-# STRIPE_PRICE_ID_160: €8  → 160 credits
-# STRIPE_PRICE_ID_320: €16 → 320 credits
+# STRIPE_PRICE_ID_90:  €2  → 90 credits  (Starter)
+# STRIPE_PRICE_ID_270: €5  → 270 credits (Standard)
+# STRIPE_PRICE_ID_600: €10 → 600 credits (Plus)
 PACKAGES = {
-    "small":  {"credits": 80,  "price_id_env": "STRIPE_PRICE_ID_80"},
-    "medium": {"credits": 160, "price_id_env": "STRIPE_PRICE_ID_160"},
-    "large":  {"credits": 320, "price_id_env": "STRIPE_PRICE_ID_320"},
+    "starter":  {"credits": 90,  "price_id_env": "STRIPE_PRICE_ID_90"},
+    "standard": {"credits": 270, "price_id_env": "STRIPE_PRICE_ID_270"},
+    "plus":     {"credits": 600, "price_id_env": "STRIPE_PRICE_ID_600"},
 }
 
 
 class CheckoutRequest(BaseModel):
-    package: str  # "small" | "medium" | "large"
+    package: str  # "starter" | "standard" | "plus"
 
 
 @router.post("/checkout")
@@ -45,7 +45,7 @@ def create_checkout(
     if not pkg:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown package '{body.package}'. Must be one of: small, medium, large.",
+            detail=f"Unknown package '{body.package}'. Must be one of: starter, standard, plus.",
         )
 
     price_id = os.environ.get(pkg["price_id_env"], "")
@@ -94,7 +94,7 @@ async def stripe_webhook(request: Request, db: DBSession = Depends(get_db)):
             metadata = obj["metadata"]  # always present; empty if none set
             user_id = metadata["user_id"] if "user_id" in metadata else None
             credits_str = metadata["credits"] if "credits" in metadata else "0"
-            _VALID_CREDIT_VALUES = {80, 160, 320}
+            _VALID_CREDIT_VALUES = {90, 270, 600}
             try:
                 credits = int(credits_str)
             except (ValueError, TypeError):
@@ -121,9 +121,11 @@ async def stripe_webhook(request: Request, db: DBSession = Depends(get_db)):
                 if customer_id and not user.stripe_customer_id:
                     user.stripe_customer_id = customer_id
                 user.query_credits += credits
+                user.tier = "paid"
+                user.low_balance_notified = False
                 db.commit()
                 logger.info(
-                    "Added %d credits to user %s (total: %d)",
+                    "Added %d credits to user %s (total: %d) tier=paid",
                     credits, user.id, user.query_credits,
                 )
             else:
