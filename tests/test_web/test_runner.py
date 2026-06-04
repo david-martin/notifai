@@ -87,6 +87,7 @@ def test_run_sends_email_on_yes(user_with_query, runner_db):
 
     with patch("web.runner.anthropic.Anthropic") as MockClient, \
          patch("web.runner.resend.Emails.send") as mock_send, \
+         patch("web.runner.notify_if_low_balance"), \
          patch("web.runner.get_session", return_value=runner_db):
         MockClient.return_value.messages.create.return_value = mock_resp
         from web.runner import run_checks
@@ -102,6 +103,7 @@ def test_run_silent_on_no(user_with_query, runner_db):
 
     with patch("web.runner.anthropic.Anthropic") as MockClient, \
          patch("web.runner.resend.Emails.send") as mock_send, \
+         patch("web.runner.notify_if_low_balance"), \
          patch("web.runner.get_session", return_value=runner_db):
         MockClient.return_value.messages.create.return_value = mock_resp
         from web.runner import run_checks
@@ -384,3 +386,26 @@ def test_run_continues_after_malformed_json(runner_db):
     # Second query should still produce a log entry
     logs = runner_db.query(NotificationLog).all()
     assert len(logs) == 1
+
+
+def test_runner_triggers_low_balance_notification(user_with_query, runner_db):
+    """Runner calls notify_if_low_balance after a successful credit deduction."""
+    from web.models import Query, User
+    user, query = user_with_query
+    user.query_credits = 11   # will drop to 10 — at threshold
+    user.tier = "free"
+    user.low_balance_notified = False
+    query.next_check_at = None
+    runner_db.commit()
+
+    mock_resp = _mock_claude_response("NO", "Not yet.", [])
+
+    with patch("web.runner.anthropic.Anthropic") as MockClient, \
+         patch("web.runner.resend.Emails.send"), \
+         patch("web.runner.notify_if_low_balance") as mock_notify, \
+         patch("web.runner.get_session", return_value=runner_db):
+        MockClient.return_value.messages.create.return_value = mock_resp
+        from web.runner import run_checks
+        run_checks()
+
+    mock_notify.assert_called_once()

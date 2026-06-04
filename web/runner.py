@@ -14,6 +14,7 @@ from sqlalchemy import or_
 
 from web.database import SessionLocal
 from web.models import MagicLink, NotificationLog, Query, Session as SessionModel, User
+from web.notifications import notify_if_low_balance
 
 from core import (
     MODEL,
@@ -129,6 +130,8 @@ def _handle_result(db, q, user, result_dict, from_email):
     user.query_credits = max(0, user.query_credits - 1)
     db.commit()
     logger.info("credit_deducted query_id=%s user=%s credits_remaining=%d", q.id, user.email, user.query_credits)
+
+    notify_if_low_balance(user, db, from_email)
 
     # Advance next_check_at so the runner skips this query until the interval elapses again.
     q.next_check_at = advance_interval(datetime.now(timezone.utc).replace(tzinfo=None), q.check_interval)
