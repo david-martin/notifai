@@ -136,7 +136,18 @@ function renderQueries() {
   });
 
   notice.textContent = "";
-  document.getElementById("newQueryBtn").disabled = false;
+  const newQueryBtn = document.getElementById("newQueryBtn");
+  newQueryBtn.disabled = false;
+  newQueryBtn.title = "";
+
+  if (userTier === "free") {
+    const activeCount = queries.filter(q => q.active).length;
+    if (activeCount >= 1) {
+      newQueryBtn.disabled = true;
+      newQueryBtn.title = "Free accounts support 1 active query. Purchase credits to add more.";
+      notice.innerHTML = `Free accounts support 1 active query. <a href="/account.html">Buy credits</a> to track more.`;
+    }
+  }
 }
 
 async function toggleQuery(id, active) {
@@ -399,6 +410,13 @@ document.getElementById("confirmBtn").addEventListener("click", async () => {
     });
     if (!r) { btn.disabled = false; btn.textContent = "Add query"; return; }
 
+    if (r.status === 403) {
+      errEl.innerHTML = `Free accounts support 1 active query. <a href="/account.html">Buy credits</a> to add more.`;
+      errEl.style.display = "block";
+      btn.disabled = false;
+      btn.textContent = "Add query";
+      return;
+    }
     if (r.status === 429) {
       errEl.textContent = "Active query limit reached. Pause or remove an existing query.";
       errEl.style.display = "block";
