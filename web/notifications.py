@@ -30,6 +30,10 @@ def notify_if_low_balance(user: User, db: DBSession, from_email: str) -> bool:
         logger.warning("low_balance_notify_skipped user=%s reason=no_api_key", user.email)
         return False
 
+    if not from_email:
+        logger.warning("low_balance_notify_skipped user=%s reason=no_from_email", user.email)
+        return False
+
     active_daily = (
         db.query(Query)
         .filter(
@@ -40,7 +44,8 @@ def notify_if_low_balance(user: User, db: DBSession, from_email: str) -> bool:
         .all()
     )
 
-    # Mark notified before sending — prevents double-send on retry
+    # Mark notified before sending — prevents a second deduction in the same runner pass
+    # from sending a duplicate notification for the same low-balance episode.
     user.low_balance_notified = True
     db.commit()
 
