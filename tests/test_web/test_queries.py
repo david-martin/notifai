@@ -5,6 +5,7 @@ import pytest
 @pytest.fixture
 def auth_client(client, db):
     """Client with an authenticated session."""
+    from web.models import User
     token = None
     def capture(email, t):
         nonlocal token
@@ -13,6 +14,12 @@ def auth_client(client, db):
     with patch("web.routers.auth.send_magic_link_email", side_effect=capture):
         client.post("/auth/request", json={"email": "user@example.com"})
     client.get(f"/auth/verify?token={token}", follow_redirects=False)
+
+    # Set user to paid tier to avoid free-tier cap in tests
+    user = db.query(User).filter(User.email == "user@example.com").first()
+    user.tier = "paid"
+    db.commit()
+
     return client
 
 
@@ -199,3 +206,86 @@ def test_patch_interval_with_history_advances_next_check_at(auth_client, db):
     assert next_check is not None
     # next_check_at should be 7 days after last checked_at: 2026-05-27
     assert next_check.startswith("2026-05-27")
+
+
+def test_free_user_cannot_create_second_active_query(client, db):
+    """A free-tier user with 1 active query must receive 403 on a second creation."""
+    from web.models import Query, User
+
+    # Create and authenticate a free user
+    token = None
+    def capture(email, t):
+        nonlocal token
+        token = t
+    with patch("web.routers.auth.send_magic_link_email", side_effect=capture):
+        client.post("/auth/request", json={"email": "freeuser@example.com"})
+    client.get(f"/auth/verify?token={token}", follow_redirects=False)
+
+    # Give user credits and ensure they're free tier
+    user = db.query(User).filter(User.email == "freeuser@example.com").first()
+    user.query_credits = 20
+    user.tier = "free"
+    db.commit()
+
+    # Add existing active query directly (bypass create endpoint for setup)
+    existing = Query(user_id=user.id, query_text="first active query", active=True)
+    db.add(existing)
+    db.commit()
+
+    # Try to create a second query
+    r = client.post("/queries", json={"query_text": "second query is quite important"})
+    assert r.status_code == 403
+    assert "Free accounts" in r.json()["detail"]
+
+
+def test_paid_user_can_create_multiple_queries(client, db):
+    """A paid-tier user must not be blocked by the free-tier cap."""
+    from web.models import Query, User
+
+    token = None
+    def capture(email, t):
+        nonlocal token
+        token = t
+    with patch("web.routers.auth.send_magic_link_email", side_effect=capture):
+        client.post("/auth/request", json={"email": "paiduser@example.com"})
+    client.get(f"/auth/verify?token={token}", follow_redirects=False)
+
+    user = db.query(User).filter(User.email == "paiduser@example.com").first()
+    user.query_credits = 100
+    user.tier = "paid"
+    db.commit()
+
+    existing = Query(user_id=user.id, query_text="first active query", active=True)
+    db.add(existing)
+    db.commit()
+
+    # Paid user must get through to validation (422 = guard model reject, not 403)
+    r = client.post("/queries", json={"query_text": "second query is here now testing"})
+    assert r.status_code != 403
+
+
+def test_free_user_can_create_query_after_pausing_existing(client, db):
+    """Free user with 0 active queries (paused) can create a new one."""
+    from web.models import Query, User
+
+    token = None
+    def capture(email, t):
+        nonlocal token
+        token = t
+    with patch("web.routers.auth.send_magic_link_email", side_effect=capture):
+        client.post("/auth/request", json={"email": "freeuser2@example.com"})
+    client.get(f"/auth/verify?token={token}", follow_redirects=False)
+
+    user = db.query(User).filter(User.email == "freeuser2@example.com").first()
+    user.query_credits = 20
+    user.tier = "free"
+    db.commit()
+
+    # Paused query — active=False, so active_count == 0
+    paused = Query(user_id=user.id, query_text="paused query", active=False)
+    db.add(paused)
+    db.commit()
+
+    # Should NOT be blocked (422 from guard = fine, just not 403)
+    r = client.post("/queries", json={"query_text": "new query is here testing now"})
+    assert r.status_code != 403

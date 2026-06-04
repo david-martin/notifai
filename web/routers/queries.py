@@ -217,6 +217,12 @@ def create_query(
     active_count = (
         db.query(Query).filter(Query.user_id == user.id, Query.active == True).count()
     )
+    if user.tier == "free" and active_count >= 1:
+        logger.info("create_query_free_tier_cap user=%s active=%d", user.email, active_count)
+        raise HTTPException(
+            status_code=403,
+            detail="Free accounts support 1 active query. Purchase credits to add more.",
+        )
     if active_count >= MAX_ACTIVE_QUERIES:
         logger.info("create_query_cap_reached user=%s active=%d", user.email, active_count)
         raise HTTPException(
