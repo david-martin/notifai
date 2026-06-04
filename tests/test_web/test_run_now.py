@@ -85,7 +85,9 @@ def test_run_now_sends_email_on_yes(auth_client, query_id, db):
             r = auth_client.post(f"/queries/{query_id}/run")
 
     assert r.status_code == 200
-    mock_send.assert_called_once()
+    # query_id fixture gives user 10 credits, which drops to 9 after run.
+    # This triggers both a low-balance email AND a YES email, so 2 calls total.
+    assert mock_send.call_count == 2
     data = r.json()
     assert data["answer"] == "YES"
     assert data["email_sent"] is True
@@ -186,3 +188,47 @@ def test_run_now_does_not_deduct_on_api_error(auth_client, db, query_id):
     db.expire(user)
     db.refresh(user)
     assert user.query_credits == 5  # unchanged
+
+
+def test_run_now_triggers_low_balance_notification_at_threshold(auth_client, db):
+    """When credits drop to <= 10 after a manual run, low-balance email is sent."""
+    from web.models import Query, User
+
+    user = db.query(User).filter(User.email == "user@example.com").first()
+    user.query_credits = 11  # will drop to 10 after run
+    user.tier = "free"
+    user.low_balance_notified = False
+    q = Query(user_id=user.id, query_text="Test query", active=True)
+    db.add(q)
+    db.commit()
+    query_id = q.id
+
+    with patch("web.routers.queries.anthropic_client") as mock_client, \
+         patch("web.routers.queries.notify_if_low_balance") as mock_notify, \
+         patch.dict("os.environ", {"RESEND_FROM_EMAIL": "notifai@example.com"}):
+        mock_client.messages.create.return_value = _mock_claude("NO", "Not yet.")
+        auth_client.post(f"/queries/{query_id}/run")
+
+    mock_notify.assert_called_once()
+    call_args = mock_notify.call_args
+    assert call_args[0][2] == "notifai@example.com"     # from_email
+
+
+def test_run_now_does_not_notify_when_credits_above_threshold(auth_client, db):
+    """No low-balance notification when credits remain above 10 after run."""
+    from web.models import Query, User
+
+    user = db.query(User).filter(User.email == "user@example.com").first()
+    user.query_credits = 50
+    q = Query(user_id=user.id, query_text="Test query 2", active=True)
+    db.add(q)
+    db.commit()
+
+    with patch("web.routers.queries.anthropic_client") as mock_client, \
+         patch("web.routers.queries.notify_if_low_balance") as mock_notify, \
+         patch.dict("os.environ", {"RESEND_FROM_EMAIL": "notifai@example.com"}):
+        mock_client.messages.create.return_value = _mock_claude("NO", "Not yet.")
+        auth_client.post(f"/queries/{q.id}/run")
+
+    # notify_if_low_balance is called (it decides internally whether to send)
+    mock_notify.assert_called_once()

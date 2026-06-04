@@ -17,6 +17,7 @@ from web.auth import get_current_user
 from web.database import get_db
 from web.limiter import limiter
 from web.models import NotificationLog, Query, User
+from web.notifications import notify_if_low_balance
 
 from core import (
     ASSIST_MODEL,
@@ -412,6 +413,10 @@ def run_query_now(
     user.query_credits = max(0, user.query_credits - 1)
     db.commit()
     logger.info("credit_deducted query_id=%s credits_remaining=%d", query_id, user.query_credits)
+
+    from_email = os.environ.get("RESEND_FROM_EMAIL", "")
+    if from_email:
+        notify_if_low_balance(user, db, from_email)
 
     if answer == "YES":
         from_email = os.environ.get("RESEND_FROM_EMAIL", "")
